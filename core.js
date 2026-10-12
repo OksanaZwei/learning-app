@@ -492,13 +492,31 @@
       '4. Danach das n\u00e4chste, etwas schwierigere Szenario.\n\nStarte mit Szenario 1.';
   }
 
+  function buildSparringPrompt(name, path, summary, cards) {
+    const mats = [];
+    if (summary && summary.trim()) mats.push('Zusammenfassung:\n' + summary.trim().slice(0, 2000));
+    if (cards && cards.length) {
+      mats.push('Karten:\n' + cards.slice(0, 20).map((c) => '- ' + plain(c.front, 120) + ' :: ' + plain(c.back, 180)).join('\n'));
+    }
+    return 'Du bist ein erfahrener Senior-Entwickler in meinem Team und mein Sparringspartner. Ich arbeite im Produktmanagement und will mit dir auf Augenhöhe über „' +
+      (path && path.length ? path.join(' > ') : (name || 'IT und Produktmanagement')) + '“ sprechen können.\n\n' +
+      'Ich lerne am besten durch Tun, nicht durch Lesen. Deshalb:\n' +
+      '1. Starte direkt mit einer realistischen Situation aus dem Arbeitsalltag (z. B. du willst Technik-Schulden abbauen, ein Ausfall ist passiert, eine Schätzung steht zur Diskussion). Keine Vorlesung vorweg.\n' +
+      '2. Sprich wie ein echter Entwickler, mit Fachbegriffen, aber nie unfreundlich. Stelle EINE Frage oder Aussage pro Nachricht und warte auf mich.\n' +
+      '3. Nach meiner Antwort: erst kurz im Spiel bleiben (reagiere als Entwickler), dann in einem eigenen Absatz „Coach:“ Feedback: Was war gut? Welcher Begriff fehlte oder war falsch? Welche bessere Rückfrage hätte ich stellen können?\n' +
+      '4. Wenn ich einen Begriff nicht kenne, erkläre ihn in 2 Sätzen mit Alltagsvergleich und lass ihn mich danach selbst in eigenen Worten wiederholen.\n' +
+      '5. Steigere die Schwierigkeit langsam. Wechsle auch mal das Thema, damit ich nicht nur Auswendiges abrufe.\n' +
+      '6. Am Ende (wenn ich „Ende“ schreibe): Liste meine Lücken als Karten im Format „Frage :: Antwort“ unter einer Zeile „# Bereich > Thema“, damit ich sie in meine Lern-App importieren kann.\n\n' +
+      (mats.length ? 'Mein bisheriger Lernstoff (nutze ihn, aber geh gern darüber hinaus):\n\n' + mats.join('\n\n') + '\n\n' : '') + 'Starte jetzt mit der ersten Situation.';
+  }
+
   const api = {
     uid, newCard, normalizeCard, isNew, schedule, fmtInterval, buildQueue, stats,
     childrenOf, subtreeIds, pathOf, aggregate, flatTopics, ensurePath,
     esc, renderMd, plain, clean, wordCount, splitPath, parseMarkdown, noteBody, demoteHeadings, toMarkdown,
     fromJSON, parseAny, toBackup, mergeDecks, shuffle, termCovered,
     FOLLOWUPS, explainRating,
-    buildArticlePrompt, buildTermsPrompt, buildTutorPrompt, buildCoachPrompt
+    buildArticlePrompt, buildTermsPrompt, buildTutorPrompt, buildCoachPrompt, buildSparringPrompt
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

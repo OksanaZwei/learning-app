@@ -40,7 +40,8 @@
     } catch (e) { /* ignore */ }
     return fresh;
   }
-  function save() {
+  function save(clean) {
+    if (!clean && !S.dirty) S.dirty = Date.now();
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
     catch (e) { toast('Speichern fehlgeschlagen – Speicher voll?'); }
   }
@@ -137,6 +138,7 @@
     return '<header class="top"><div><p class="eyebrow">' + esc(today) + '</p><h1>Recall</h1></div><div class="row nowrap" style="align-items:center">' +
       (st ? '<span class="pill"><i class="dot"></i>' + plural(st, 'Tag', 'Tage') + '</span>' : '') +
       '<button class="x" data-a="go-search" aria-label="Suche">' + ICON.search + '</button></div></header>' +
+      (backupDue() ? '<button class="item" style="margin-bottom:14px" data-a="exp-all-json"><div class="grow"><div class="t">Zeit für ein Backup</div><div class="s">' + esc(backupLabel()) + ' Tippen, dann per Mail an dich selbst sichern.</div></div>' + ICON.chev + '</button>' : '') +
       '<section class="hero"><p class="eyebrow">Heute dran</p><div class="big">' + todo + (todo ? '<i class="dot"></i>' : '') + '</div>' +
       '<p class="muted">' + due + ' fällig · ' + nw + ' neu · ' + done + ' heute gelernt</p>' +
       '<button class="btn primary block" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>' +
@@ -497,6 +499,13 @@
       '<div class="row nowrap"><select id="pr-limit" style="width:auto">' + [20, 40, 60].map((n) => '<option value="' + n + '"' + (n === lim ? ' selected' : '') + '>' + n + ' Wörter</option>').join('') + '</select><button class="btn primary grow" data-a="start-point">Starten</button></div></section>' +
       '<section><div class="sec-head"><h2>Mit Claude üben</h2></div><p class="muted small" style="margin-bottom:12px">Für echtes Nachfragen und Feedback zu deinen eigenen Formulierungen: Prompt kopieren und in Claude einfügen.</p>' +
       '<div class="row"><button class="btn ghost sm" data-a="copy-tutor-pr">Tutor (Thema)</button><button class="btn ghost sm" data-a="copy-coach">Kommunikations-Coach</button></div></section>' +
+      '<section><div class="sec-head"><h2>Dev-Sparring</h2></div><p class="muted small" style="margin-bottom:12px">Üben wie im echten Meeting: Claude spielt einen Senior-Entwickler, du antwortest, und es gibt direkt Feedback. Mit gewähltem Thema nutzt es deinen Lernstoff.</p>' +
+      '<button class="btn primary block" data-a="copy-sparring">Sparring-Prompt kopieren</button></section>' +
+      '<section><div class="sec-head"><h2>So lernst du am besten</h2></div>' +
+      '<details><summary>1. Erst raten, dann nachlesen</summary><div class="md" style="margin-top:10px"><p>Antworte bei jeder Karte zuerst aus dem Kopf, auch wenn du unsicher bist. Das Abrufen prägt sich stärker ein als erneutes Lesen. Bewerte ehrlich: „Nochmal“ ist kein Fehler, sondern der Plan.</p></div></details>' +
+      '<details><summary>2. Täglich 10 Minuten statt einmal lang</summary><div class="md" style="margin-top:10px"><p>Kurze Einheiten mit Pausen dazwischen bleiben besser hängen. Die App legt die Abstände für dich fest. Du musst nur kommen.</p></div></details>' +
+      '<details><summary>3. In eigenen Worten erklären</summary><div class="md" style="margin-top:10px"><p>Was du ohne Fachsprache erklären kannst, hast du verstanden. Nutze das Erklär-Training und danach „Auf den Punkt“.</p></div></details>' +
+      '<details><summary>4. Tun statt nur lesen</summary><div class="md" style="margin-top:10px"><p>Übe in Situationen: Dev-Sparring, Begriff aus dem Meeting direkt in <em>Wörter</em> eintragen, und beim nächsten Gespräch eine der Rückfragen aus dem Meeting-Toolkit wirklich stellen.</p></div></details></section>' +
       '<section><div class="sec-head"><h2>Meeting-Toolkit</h2></div>' +
       '<details><summary>Antwort zuerst (BLUF)</summary><div class="md" style="margin-top:10px"><p>Das Ergebnis oder die Bitte steht im ersten Satz.</p><ul><li>Statt: „Wir haben uns die Zahlen angeschaut und …“</li><li>Besser: „Wir sollten Feature X verschieben, weil …“</li></ul></div></details>' +
       '<details><summary>Drei Sätze, die immer funktionieren</summary><div class="md" style="margin-top:10px"><ul><li><strong>1.</strong> Kernaussage</li><li><strong>2.</strong> Wichtigster Grund oder Beleg</li><li><strong>3.</strong> Was jetzt passieren soll</li></ul></div></details>' +
@@ -512,7 +521,8 @@
     let body = '';
     if (t === 'text') {
       body = '<label for="im-text">Markdown, JSON oder Obsidian-Notiz einfügen</label>' +
-        '<textarea id="im-text" class="mono" rows="9" placeholder="# IT > Web &amp; APIs\n\n## Zusammenfassung\n…\n\n## Karten\nWas ist eine API? :: Eine Schnittstelle …"></textarea>';
+        '<textarea id="im-text" class="mono" rows="9" placeholder="# IT > Web &amp; APIs\n\n## Zusammenfassung\n…\n\n## Karten\nWas ist eine API? :: Eine Schnittstelle …"></textarea>' +
+        '<details style="margin-top:10px"><summary>Notiz vom Laptop abfotografieren?</summary><div class="md" style="margin-top:10px"><ol><li>Kamera auf den Bildschirm richten.</li><li>Unten rechts auf das Text-Symbol tippen, dann <em>Alles auswählen</em> und <em>Kopieren</em>.</li><li>Hier einfügen und die Option „Gesamten Text als Zusammenfassung speichern“ anhaken.</li></ol><p>Für Karten: Prompt hier unter Import kopieren („Prompt kopieren“) und das Foto in Claude hochladen. Prüfe vorher, ob deine Firma das erlaubt.</p></div></details>';
     } else if (t === 'file') {
       body = '<label>Dateien aus Obsidian (.md), Text oder JSON-Backup</label><label class="btn ghost block" for="im-file" style="margin:0">Dateien auswählen</label>' +
         '<input id="im-file" type="file" multiple accept=".md,.markdown,.txt,.json,text/*,application/json"><p class="hint">Der Dateiname dient als Thema, wenn keine Überschrift # vorhanden ist.</p>';
@@ -596,7 +606,9 @@
     const total = S.decks.reduce((a, d) => a + d.cards.length, 0);
     return '<header class="top"><div><p class="eyebrow">Daten &amp; Einstellungen</p><h1>Mehr</h1></div></header>' +
       '<section><div class="sec-head"><h2>Backup</h2></div><p class="muted small" style="margin-bottom:12px">' + plural(S.decks.length, 'Thema', 'Themen') + ' · ' + plural(total, 'Karte', 'Karten') + ' · ' + plural(S.terms.length, 'Wort', 'Wörter') +
-      '. Alles liegt nur auf diesem Gerät – mach regelmäßig ein Backup.</p><div class="row"><button class="btn primary grow" data-a="exp-all-json">Backup (JSON)</button><button class="btn ghost grow" data-a="exp-all-md">Alles als Markdown</button></div>' +
+      '. Alles liegt nur auf diesem Gerät. ' + esc(backupLabel()) + '</p>' +
+      '<p class="muted small" style="margin-bottom:12px">Tipp: Im Teilen-Menü „Mail“ wählen und die Datei an dich selbst schicken. Auf einem neuen Handy lädst du sie hier wieder ein.</p>' +
+      '<div class="row"><button class="btn primary grow" data-a="exp-all-json">Backup sichern</button><button class="btn ghost grow" data-a="exp-all-md">Alles als Markdown</button></div>' +
       '<div class="row"><label class="btn ghost block" for="restore" style="margin:0">Backup einspielen</label><input id="restore" type="file" accept=".json,application/json"></div></section>' +
       '<section><div class="sec-head"><h2>Lernen</h2></div><label for="newper" style="margin-top:0">Neue Karten pro Sitzung und Thema</label><input id="newper" type="number" min="0" max="200" inputmode="numeric" value="' + S.settings.newPerSession + '"></section>' +
       '<section><div class="sec-head"><h2>Gefahrenzone</h2></div><button class="btn danger block" data-a="reset">Alle Daten löschen</button></section>' +
@@ -630,13 +642,25 @@
   async function saveFile(name, text, type) {
     const file = new File([text], name, { type: type || 'text/plain' });
     try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
-    } catch (e) { if (e && e.name === 'AbortError') return; }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return true; }
+    } catch (e) { if (e && e.name === 'AbortError') return false; }
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  }
+
+  const WEEK = 7 * 864e5;
+  function backupDue() {
+    const has = S.decks.some((d) => d.cards.length || (d.summary && d.summary.trim())) || S.terms.length;
+    return !!(has && S.dirty > 0 && Date.now() - (S.lastBackup || S.dirty) > WEEK);
+  }
+  function backupLabel() {
+    if (!S.lastBackup) return 'Noch kein Backup gemacht.';
+    const n = Math.floor((Date.now() - S.lastBackup) / 864e5);
+    return 'Letztes Backup: ' + (n <= 0 ? 'heute' : n === 1 ? 'gestern' : 'vor ' + n + ' Tagen') + '.';
   }
 
   function b64u(u8) {
@@ -704,6 +728,14 @@
     C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => cards.push(c)));
     const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
     return C.buildTutorPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
+  }
+
+  function sparringPrompt(id) {
+    const t = deckById(id);
+    const cards = [];
+    C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => cards.push(c)));
+    const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
+    return C.buildSparringPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
   }
 
   /* ---------- actions ---------- */
@@ -855,7 +887,11 @@
       if (navigator.share) { try { await navigator.share({ title: t.name, text: 'Recall: ' + t.name, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
       toast((await copyText(url)) ? (url.length > 8000 ? 'Link kopiert (sehr lang – besser als Datei teilen)' : 'Link kopiert') : 'Kopieren nicht möglich');
     },
-    'exp-all-json'() { saveFile('recall-backup-' + dayKey() + '.json', JSON.stringify(C.toBackup(S.decks, null, { terms: S.terms, log: S.log }), null, 2), 'application/json'); },
+    async 'exp-all-json'() {
+      const ok = await saveFile('recall-backup-' + dayKey() + '.json', JSON.stringify(C.toBackup(S.decks, null, { terms: S.terms, log: S.log }), null, 2), 'application/json');
+      if (ok) { S.lastBackup = Date.now(); S.dirty = 0; save(true); render(); toast('Backup erstellt – speichere es in Mail, Dateien oder OneDrive'); }
+    },
+    'copy-sparring'() { if (!V.topic) return copyPrompt(C.buildSparringPrompt('', null, '', []), 'Sparring-Prompt kopiert – in Claude einfügen'); copyPrompt(sparringPrompt(V.topic), 'Sparring-Prompt kopiert – in Claude einfügen'); },
     'exp-all-md'() {
       const text = S.decks.filter((d) => d.cards.length || (d.summary && d.summary.trim())).map((d) => C.toMarkdown(d, C.pathOf(S.decks, d.id))).join('\n');
       if (!text) return toast('Noch nichts zu exportieren.');

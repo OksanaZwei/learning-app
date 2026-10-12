@@ -24,7 +24,7 @@ Jedes **Thema** hat: Zusammenfassung (Nachlesen + Glossar), Karten, Unterthemen,
 | `core.js` | Logik: Themenbaum, Wiederholungsplan, Import/Export, Prompts |
 | `starter.js` | Starter-Pakete (IT, Produktmanagement, Kommunikation; 67 Karten) |
 | `app.js` | Ansichten und Bedienung |
-| `sw.js`, `manifest.webmanifest`, `icons/` | Offline-Betrieb und Installation aufs Handy |
+| `sw.js`, `manifest.webmanifest`, `*.png` (Icons) | Offline-Betrieb und Installation aufs Handy |
 
 ## Aufs Handy bringen
 

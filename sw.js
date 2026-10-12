@@ -1,7 +1,7 @@
-const VERSION = 'recall-v2';
+const VERSION = 'recall-v3';
 const ASSETS = [
   './', './index.html', './styles.css', './core.js', './starter.js', './app.js',
-  './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
+  './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
