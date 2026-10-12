@@ -1,0 +1,79 @@
+# Recall
+
+Private Lern-App (PWA) für IT und Produktmanagement: Themenbaum, Zusammenfassungen zum Nachlesen,
+Karteikarten mit Wiederholungsplan, Wortspeicher, Erklär-Training, Quiz und Kommunikationsübungen.
+Alle Daten bleiben auf dem Handy (localStorage). Kein Konto, kein Tracking, kein Build-Schritt.
+
+## Aufbau der App
+
+| Tab | Zweck |
+|---|---|
+| **Start** | Heute fällige Karten, Bereiche (Produktmanagement, IT, Kommunikation) mit Unterthemen, Suche |
+| **Wörter** | Unbekannte Begriffe aus Meetings sofort festhalten, später erklären lassen und zu Karten machen |
+| **Üben** | Erklär-Training (fragt nach), „Auf den Punkt“ (kurz zusammenfassen), Meeting-Toolkit, Prompts für Claude |
+| **Import** | Obsidian-Notizen, Dateien, Links, Starter-Pakete, Artikel → Karten |
+| **Mehr** | Backup, Export, Einstellungen |
+
+Jedes **Thema** hat: Zusammenfassung (Nachlesen + Glossar), Karten, Unterthemen, Lernen, Erklären, Quiz.
+
+## Dateien
+
+| Datei | Zweck |
+|---|---|
+| `index.html`, `styles.css` | Oberfläche (hell, Schwarz/Weiß/Grau, rote Akzente) |
+| `core.js` | Logik: Themenbaum, Wiederholungsplan, Import/Export, Prompts |
+| `starter.js` | Starter-Pakete (IT, Produktmanagement, Kommunikation; 67 Karten) |
+| `app.js` | Ansichten und Bedienung |
+| `sw.js`, `manifest.webmanifest`, `icons/` | Offline-Betrieb und Installation aufs Handy |
+
+## Aufs Handy bringen
+
+1. Ordner in dein Git-Repo legen und bei einem Static-Host veröffentlichen (kostenlos, z. B. Cloudflare Pages oder Netlify; GitHub Pages geht bei privaten Repos nur mit bezahltem Plan). Die Seite enthält nur Code, keine Lerndaten.
+2. Adresse auf dem Handy öffnen.
+   - iPhone: Safari → Teilen → **Zum Home-Bildschirm**
+   - Android: Chrome → ⋮ → **App installieren**
+3. Danach läuft sie offline wie eine App.
+
+Lokal testen: `python3 -m http.server 8000` im Ordner, dann `http://localhost:8000`.
+
+## Karten-Format (Obsidian-kompatibel)
+
+```
+# Bereich > Thema
+
+## Zusammenfassung
+Text zum Nachlesen (bis zur nächsten # oder ## Überschrift)
+
+## Karten
+Frage :: Antwort
+- Auch in Listen :: funktioniert
+
+Mehrzeilige Frage
+?
+Antwort über
+mehrere Zeilen
+
+Q: Frage
+A: Antwort
+```
+
+- `# A > B` legt Thema B unter Bereich A an; mehrere `#`-Überschriften pro Datei sind möglich.
+- `::` braucht Leerzeichen drumherum (so bleibt `std::vector` im Text unangefährdet).
+- Codeblöcke (```) bleiben erhalten, `[[Wikilinks]]` werden bereinigt, `#flashcards` wird entfernt.
+- Beim Import kannst du ein Zielthema wählen und den ganzen Text zusätzlich als Zusammenfassung speichern (für Obsidian-Notizen, die du nachlesen willst).
+- Export: pro Thema (inkl. Unterthemen) als `.md` im selben Format oder als JSON; Gesamt-Backup unter **Mehr**.
+
+## Workflows mit Claude (kostenlos, im Chat)
+
+- **Artikel → Zusammenfassung + Karten:** Import → „Prompt kopieren“, Artikel anhängen, Antwort einfügen.
+- **Unbekannte Wörter:** Wörter → „Alle an Claude“, Antwort unter Import einfügen. Passende Wörter werden automatisch erledigt.
+- **Wirklich verstehen:** Thema → „Tutor-Prompt kopieren“. Claude fragt im Chat nach, bis du es erklären kannst, und liefert am Ende Karten für deine Lücken.
+- **Kommunikation:** Üben → „Kommunikations-Coach“ für Feedback zu deinen Formulierungen.
+
+Das App-eigene Erklär-Training und „Auf den Punkt“ funktionieren ohne KI: Du vergleichst deine Antwort selbst mit der Referenz; bei „noch nicht ganz“ kommt eine Nachfrage mit neuem Blickwinkel.
+
+## Hinweise
+
+- Auf dem iPhone hat die installierte App einen eigenen Speicher, getrennt von Safari. Importiere deshalb direkt in der installierten App und mach regelmäßig ein Backup (**Mehr → Backup**).
+- Teilen-Links (`…#import=…`) in das Feld **Import → Link** der installierten App einfügen.
+- Raw-Links aus privaten GitHub-Repos lassen sich nicht laden; dafür Datei-Import nutzen.
