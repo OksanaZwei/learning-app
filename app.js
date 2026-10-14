@@ -2,7 +2,6 @@
 (function () {
   'use strict';
   const C = window.Core;
-  const PACKS = window.STARTERS || [];
   const KEY = 'recall.v1';
   const esc = C.esc;
   const md = C.renderMd;
@@ -15,17 +14,27 @@
     search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>'
   };
 
-  // Suggested structure for a fresh install (empty topics, rename or delete as you like).
-  const SEED = [
-    ['Produktmanagement', ['Grundlagen & Rolle', 'Discovery & Research', 'Strategie & Roadmap', 'Priorisierung', 'Agile & Delivery', 'Metriken & Analytics', 'Stakeholder & Kommunikation']],
-    ['IT', ['Web & APIs', 'Softwareentwicklung & Git', 'Cloud & DevOps', 'Datenbanken', 'Architektur', 'Sicherheit', 'Netzwerke & Internet']],
-    ['Kommunikation', ['Auf den Punkt']]
-  ];
+  // name, accent, text accent, soft fill, page background, line, hero from, hero to
+  const ACCENTS = {
+    zucker: ['Rosa & Gelb', '#f6a9c6', '#b03d70', '#fde4ee', '#fff8ee', '#f3e4d0', '#ffe0ec', '#fff0b3'],
+    flieder: ['Flieder', '#bba6f0', '#5b3fb0', '#ece5fb', '#f8f4fd', '#e6ddf5', null, null],
+    mint: ['Mint', '#9fe0cb', '#1f7a64', '#ddf5ec', '#f1faf6', '#d3ebe1', null, null],
+    rosa: ['Rosa', '#f4b0cb', '#b03d70', '#fbe3ee', '#fef4f8', '#f3dce6', null, null],
+    himmel: ['Himmel', '#a8d0f5', '#2b6cb0', '#e0eefc', '#f2f8fe', '#d8e6f5', null, null],
+    pfirsich: ['Pfirsich', '#f8c49a', '#b0612a', '#fdebdb', '#fff6ee', '#f5e3d2', null, null]
+  };
+  function applyAccent() {
+    const a = ACCENTS[S.settings.accent] || ACCENTS.zucker;
+    const r = document.documentElement.style;
+    r.setProperty('--accent', a[1]); r.setProperty('--accent-ink', a[2]); r.setProperty('--accent-soft', a[3]);
+    r.setProperty('--soft', a[3]); r.setProperty('--hero-a', a[6] || a[3]); r.setProperty('--hero-b', a[7] || '#fff0dc'); r.setProperty('--peach', a[7] || '#fff0dc'); r.setProperty('--bg', a[4]); r.setProperty('--line', a[5]);
+    const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', a[4]);
+  }
 
   /* ---------- state ---------- */
   let S = load();
   function load() {
-    const fresh = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 20, tasksPerDay: 5, day: 0 }, seeded: false, lastTopic: null };
+    const fresh = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 20, tasksPerDay: 5, day: 0 }, seeded: true, lastTopic: null };
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
       if (s && Array.isArray(s.decks)) {
@@ -35,7 +44,6 @@
         o.decks.forEach((d) => { if (d.parent === undefined) d.parent = null; if (typeof d.summary !== 'string') d.summary = ''; });
         o.terms = o.terms || [];
         o.comm = o.comm || [];
-        if (s.decks.length) o.seeded = true;
         return o;
       }
     } catch (e) { /* ignore */ }
@@ -46,11 +54,20 @@
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
     catch (e) { toast('Speichern fehlgeschlagen – Speicher voll?'); }
   }
-  if (!S.seeded) {
-    SEED.forEach((a) => { C.ensurePath(S.decks, [a[0]]); a[1].forEach((s) => C.ensurePath(S.decks, [a[0], s])); });
-    S.seeded = true;
-    save();
+  // Early versions created empty starter areas; remove them once if they are still completely empty.
+  if (!S.cleaned) {
+    const old = ['Produktmanagement', 'IT', 'Kommunikation', 'Grundlagen & Rolle', 'Discovery & Research', 'Strategie & Roadmap', 'Priorisierung', 'Agile & Delivery', 'Metriken & Analytics', 'Stakeholder & Kommunikation', 'Web & APIs', 'Softwareentwicklung & Git', 'Cloud & DevOps', 'Datenbanken', 'Architektur', 'Sicherheit', 'Netzwerke & Internet', 'Auf den Punkt'];
+    const kids = (id) => S.decks.filter((d) => d.parent === id);
+    const empty = (d) => !d.cards.length && !(d.summary && d.summary.trim()) && kids(d.id).every(empty);
+    const gone = new Set();
+    const mark = (d) => { gone.add(d.id); kids(d.id).forEach(mark); };
+    S.decks.filter((d) => d.parent === null && old.includes(d.name) && empty(d)).forEach(mark);
+    S.decks = S.decks.filter((d) => !gone.has(d.id));
+    S.cleaned = true;
+    save(true);
   }
+
+  applyAccent();
 
   const deckById = (id) => S.decks.find((d) => d.id === id);
   const agg = (id) => C.aggregate(S.decks, id, Date.now(), S.settings.newPerSession);
@@ -123,7 +140,7 @@
   }
 
   function taskInfo() {
-    const day = S.settings.day, limit = S.settings.tasksPerDay || 5;
+    const day = 0, limit = S.settings.tasksPerDay || 5;
     const cov = C.taskCoverage(S.decks, day);
     const done = S.tlog[dayKey()] || 0;
     const avail = cov.tasks ? C.pickTasks(S.decks, Date.now(), 50, day).length : 0;
@@ -133,15 +150,12 @@
   function taskHero(ti) {
     if (!ti.cov.tasks) return '';
     const n = Math.min(ti.left, ti.avail);
-    const sub = ti.done + ' von ' + ti.limit + ' heute · Themen geübt: ' + ti.cov.practiced + ' von ' + ti.cov.open +
-      (ti.cov.locked ? ' (' + ti.cov.locked + ' noch gesperrt)' : '');
+    const sub = ti.done + ' von ' + ti.limit + ' heute · Themen geübt: ' + ti.cov.practiced + ' von ' + ti.cov.open;
     let btn;
-    if (!ti.avail) btn = '<button class="btn primary block" disabled>Heute nichts offen</button>';
-    else if (!ti.left) btn = '<button class="btn primary block" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>';
-    else btn = '<button class="btn primary block" data-a="start-tasks">Aufgaben starten</button>';
-    const dayRow = ti.cov.locked || ti.day
-      ? '<div class="row nowrap" style="margin-top:10px;align-items:center"><span class="muted small" style="flex:1">Lernplan: Tag ' + (ti.day || '–') + '</span><button class="link" data-a="day-next">Tag ' + (ti.day + 1) + ' freischalten</button></div>' : '';
-    return '<section class="hero"><p class="eyebrow">Tagesaufgaben</p><div class="big">' + n + (n ? '<i class="dot"></i>' : '') + '</div><p class="muted">' + sub + '</p>' + btn + dayRow + '</section>';
+    if (!ti.avail) btn = '<button class="btn primary" disabled>Heute nichts offen</button>';
+    else if (!ti.left) btn = '<button class="btn primary" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>';
+    else btn = '<button class="btn primary" data-a="start-tasks">Aufgaben starten</button>';
+    return '<section class="hero"><p class="eyebrow">Heute</p><div class="big">' + plural(n, 'Aufgabe', 'Aufgaben') + '</div><p class="muted">' + sub + '</p>' + btn + '</section>';
   }
 
   function viewHome() {
@@ -160,15 +174,15 @@
     const tops = C.childrenOf(S.decks, null);
     const list = tops.length
       ? '<div class="list">' + tops.map(topicRow).join('') + '</div>'
-      : '<div class="empty"><p>Noch keine Bereiche. Lege einen an oder importiere Karten.</p><div class="row" style="justify-content:center"><button class="btn primary" data-a="new-topic" data-parent="">Bereich anlegen</button></div></div>';
+      : '<div class="empty"><p>Hier ist noch nichts. Lege einen Bereich an, zum Beispiel „IT“, oder importiere eine Notiz aus deinem Claude-Chat.</p><div class="row" style="justify-content:center"><button class="btn primary" data-a="new-topic" data-parent="">Bereich anlegen</button><button class="btn ghost" data-a="tab" data-t="import">Importieren</button></div></div>';
     return '<header class="top"><div><p class="eyebrow">' + esc(today) + '</p><h1>Recall</h1></div><div class="row nowrap" style="align-items:center">' +
       (st ? '<span class="pill"><i class="dot"></i>' + plural(st, 'Tag', 'Tage') + '</span>' : '') +
       '<button class="x" data-a="go-search" aria-label="Suche">' + ICON.search + '</button></div></header>' +
       (backupDue() ? '<button class="item" style="margin-bottom:14px" data-a="exp-all-json"><div class="grow"><div class="t">Zeit für ein Backup</div><div class="s">' + esc(backupLabel()) + ' Tippen, dann per Mail an dich selbst sichern.</div></div>' + ICON.chev + '</button>' : '') +
       taskHero(ti) +
-      (ti.cov.tasks && !todo ? '' : '<section class="hero"><p class="eyebrow">' + (ti.cov.tasks ? 'Karten' : 'Heute dran') + '</p><div class="big">' + todo + (todo ? '<i class="dot"></i>' : '') + '</div>' +
+      ((ti.cov.tasks && !todo) || !S.decks.length ? '' : '<section class="hero"><p class="eyebrow">' + (ti.cov.tasks ? 'Karten' : 'Heute dran') + '</p><div class="big">' + plural(todo, 'Karte', 'Karten') + '</div>' +
       '<p class="muted">' + due + ' fällig · ' + nw + ' neu · ' + done + ' heute gelernt</p>' +
-      '<button class="btn primary block" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>') +
+      '<button class="btn primary" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>') +
       '<div class="row nowrap" style="margin-bottom:14px"><button class="btn ghost grow" data-a="add-term">+ Begriff merken</button>' +
       '<button class="btn ghost grow" data-a="tab" data-t="practice">Üben</button></div>' +
       (open ? '<button class="item" style="margin-bottom:28px" data-a="tab" data-t="words"><div class="grow"><div class="t">' + plural(open, 'Begriff wartet', 'Begriffe warten') + ' auf Erklärung</div><div class="s">Nachlesen und Karten daraus machen</div></div>' + ICON.chev + '</button>' : '<div style="height:14px"></div>') +
@@ -401,7 +415,7 @@
 
   /* ---------- daily tasks ---------- */
   function startTasks(extra) {
-    const day = S.settings.day, limit = S.settings.tasksPerDay || 5;
+    const day = 0, limit = S.settings.tasksPerDay || 5;
     const left = extra ? 5 : Math.max(0, limit - (S.tlog[dayKey()] || 0));
     if (!left) return toast('Für heute reicht es. Morgen geht es weiter.');
     const queue = C.pickTasks(S.decks, Date.now(), left, day);
@@ -414,8 +428,8 @@
     if (!TK) return viewHome();
     const x = cur(TK);
     if (!x) {
-      const cov = C.taskCoverage(S.decks, S.settings.day);
-      const more = C.pickTasks(S.decks, Date.now(), 1, S.settings.day).length;
+      const cov = C.taskCoverage(S.decks, 0);
+      const more = C.pickTasks(S.decks, Date.now(), 1, 0).length;
       return '<div class="done"><div class="big"><i class="dot"></i></div><h1>Geschafft.</h1><p class="muted" style="margin:10px 0 26px">' + plural(TK.total, 'Aufgabe', 'Aufgaben') + ': ' + TK.ok + ' geschafft' +
         (TK.half ? ', ' + TK.half + ' halb' : '') + (TK.no ? ', ' + TK.no + ' kommen wieder' : '') + '.<br>Themen geübt: ' + cov.practiced + ' von ' + cov.open + '.</p>' +
         '<div class="stack">' + (more ? '<button class="btn ghost block" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>' : '') + '<button class="btn primary block" data-a="end-tasks">Zurück</button></div></div>';
@@ -627,13 +641,9 @@
           (d.cards[0] ? ' · z. B. „' + esc(C.plain(d.cards[0].front, 50)) + '“' : '') + '</div></div></div>').join('') +
         '</div><div class="row"><button class="btn primary grow" data-a="im-commit">Importieren</button><button class="btn ghost" data-a="im-clear">Verwerfen</button></div></div>';
     }
-    const packs = PACKS.length ? '<section style="margin-top:30px"><div class="sec-head"><h2>Starter-Pakete</h2></div><div class="list">' + PACKS.map((p, i) => {
-      const n = C.parseMarkdown(p.md, p.title).reduce((a, d) => a + d.cards.length, 0);
-      return '<div class="item"><div class="grow"><div class="t">' + esc(p.title) + '</div><div class="s">' + esc(p.desc) + ' · ' + plural(n, 'Karte', 'Karten') + '</div></div><button class="btn ghost sm" data-a="starter" data-i="' + i + '">Hinzufügen</button></div>';
-    }).join('') + '</div></section>' : '';
     return '<header class="top"><div><p class="eyebrow">Neu</p><h1>Import</h1></div></header>' +
       '<div class="seg">' + tabs.map((x) => '<button data-a="im-tab" data-t="' + x[0] + '" class="' + (t === x[0] ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</div>' +
-      body + opts + go1 + prev + packs +
+      body + opts + go1 + prev +
       '<details style="margin-top:26px"><summary>Artikel → Zusammenfassung &amp; Karten</summary><p class="hint" style="margin:8px 0 10px">Prompt kopieren, den Artikel anhängen und an Claude geben. Die Antwort fügst du hier ein – inklusive Themenzuordnung und Zusammenfassung.</p><button class="btn ghost sm" data-a="copy-article-prompt">Prompt kopieren</button></details>' +
       '<details><summary>Welche Formate werden erkannt?</summary><pre># Bereich &gt; Thema\n\n## Zusammenfassung\nText zum Nachlesen (bis zur nächsten # oder ## Überschrift)\n\n## Karten\nFrage :: Antwort\n- Auch als Liste :: geht\n\nMehrzeilige Frage\n?\nAntwort über\nmehrere Zeilen\n\nQ: Frage\nA: Antwort</pre><p class="hint">Eine Überschrift mit einem # startet ein Thema (Pfad mit &gt;). Das :: braucht Leerzeichen drumherum. Codeblöcke bleiben erhalten, [[Wikilinks]] werden bereinigt.</p></details>';
   }
@@ -682,10 +692,9 @@
     const r = C.mergeDecks(S.decks, decks);
     let resolved = 0;
     S.terms.forEach((t) => { if (!t.done && C.termCovered(t.term, r.fronts)) { t.done = true; t.doneAt = Date.now(); resolved++; } });
-    let gated = false;
-    if (!S.settings.day && decks.some((d) => C.deckDay(d) > 0 && d.cards.some(C.isTask))) { S.settings.day = 1; gated = true; }
+    const onlyTasks = decks.length && decks.every((d) => d.cards.length && d.cards.every((c) => C.isTask(c)));
     save();
-    toast(plural(r.added, 'Karte', 'Karten') + ' importiert' + (gated ? ' · Lernplan steht auf Tag 1' : '') + (r.skipped ? ' (' + plural(r.skipped, 'Duplikat', 'Duplikate') + ')' : '') + (resolved ? ' · ' + plural(resolved, 'Wort', 'Wörter') + ' erledigt' : ''));
+    toast((onlyTasks ? plural(r.added, 'Aufgabe', 'Aufgaben') : plural(r.added, 'Karte', 'Karten')) + ' importiert' + (r.skipped ? ' (' + plural(r.skipped, 'Duplikat', 'Duplikate') + ')' : '') + (resolved ? ' · ' + plural(resolved, 'Wort', 'Wörter') + ' erledigt' : ''));
     return r;
   }
 
@@ -699,8 +708,8 @@
       '<div class="row"><button class="btn primary grow" data-a="exp-all-json">Backup sichern</button><button class="btn ghost grow" data-a="exp-all-md">Alles als Markdown</button></div>' +
       '<div class="row"><label class="btn ghost block" for="restore" style="margin:0">Backup einspielen</label><input id="restore" type="file" accept=".json,application/json"></div></section>' +
       '<section><div class="sec-head"><h2>Lernen</h2></div><label for="tasksper" style="margin-top:0">Aufgaben pro Tag</label><input id="tasksper" type="number" min="1" max="30" inputmode="numeric" value="' + S.settings.tasksPerDay + '">' +
-      '<label for="lday">Lernplan: ich bin bei Tag <span class="muted small">(0 = alle Aufgaben freigeschaltet)</span></label><input id="lday" type="number" min="0" max="999" inputmode="numeric" value="' + S.settings.day + '">' +
       '<label for="newper">Neue Karten pro Sitzung und Thema</label><input id="newper" type="number" min="0" max="200" inputmode="numeric" value="' + S.settings.newPerSession + '"></section>' +
+      '<section><div class="sec-head"><h2>Farbe</h2></div><div class="row">' + Object.keys(ACCENTS).map((k) => '<button class="swatch' + ((ACCENTS[S.settings.accent] ? S.settings.accent : 'zucker') === k ? ' on' : '') + '" data-a="accent" data-c="' + k + '" aria-label="' + ACCENTS[k][0] + '" style="background:' + (k === 'zucker' ? 'linear-gradient(135deg,#f6a9c6 50%,#ffe07a 50%)' : ACCENTS[k][1]) + '"></button>').join('') + '</div></section>' +
       '<section><div class="sec-head"><h2>Gefahrenzone</h2></div><button class="btn danger block" data-a="reset">Alle Daten löschen</button></section>' +
       '<p class="tiny">Recall · läuft offline · keine Konten, kein Tracking</p>';
   }
@@ -845,7 +854,6 @@
     'tk-show'() { if (!TK) return; const t = $('#tk-text'); TK.text = t ? t.value.trim() : TK.text; TK.phase = 'show'; render(); window.scrollTo(0, 0); },
     'tk-rate': (el) => rateTask(el.dataset.r),
     'end-tasks'() { const f = TK && TK.from; TK = null; back(f); },
-    'day-next'() { S.settings.day = (S.settings.day || 0) + 1; save(); render(); toast('Tag ' + S.settings.day + ' freigeschaltet.'); },
     'start-quiz': (el) => startQuiz(el.dataset.id),
     pick: (el) => pick(el.dataset.id),
     'next-q'() { QZ.i++; QZ.picked = null; render(); window.scrollTo(0, 0); },
@@ -1061,13 +1069,7 @@
     },
     'im-commit'() { commitImport(IM.decks); IM = { decks: [], tab: IM.tab, target: '', keep: false }; go('home'); },
     'im-clear'() { IM.decks = []; render(); },
-    starter(el) {
-      const p = PACKS[+el.dataset.i];
-      if (!p) return;
-      const r = commitImport(C.parseMarkdown(p.md, p.title));
-      render();
-      return r;
-    }
+    accent(el) { S.settings.accent = el.dataset.c; save(); applyAccent(); render(); }
   };
 
   document.addEventListener('click', (e) => {
@@ -1109,8 +1111,6 @@
       } catch (err) { toast('Datei konnte nicht gelesen werden.'); }
     } else if (t.id === 'tasksper') {
       S.settings.tasksPerDay = Math.max(1, Math.min(30, parseInt(t.value, 10) || 5)); save();
-    } else if (t.id === 'lday') {
-      S.settings.day = Math.max(0, Math.min(999, parseInt(t.value, 10) || 0)); save();
     } else if (t.id === 'newper') {
       S.settings.newPerSession = Math.max(0, Math.min(200, parseInt(t.value, 10) || 0)); save();
     }

@@ -11,7 +11,7 @@ Alle Daten bleiben auf dem Handy (localStorage). Kein Konto, kein Tracking, kein
 | **Start** | Heute fällige Karten, Bereiche (Produktmanagement, IT, Kommunikation) mit Unterthemen, Suche |
 | **Wörter** | Unbekannte Begriffe aus Meetings sofort festhalten, später erklären lassen und zu Karten machen |
 | **Üben** | Erklär-Training (fragt nach), „Auf den Punkt“ (kurz zusammenfassen), Meeting-Toolkit, Prompts für Claude |
-| **Import** | Obsidian-Notizen, Dateien, Links, Starter-Pakete, Artikel → Karten |
+| **Import** | Obsidian-Notizen, Dateien, Links, Artikel → Karten |
 | **Mehr** | Backup, Export, Einstellungen |
 
 Jedes **Thema** hat: Zusammenfassung (Nachlesen + Glossar), Karten, Unterthemen, Lernen, Erklären, Quiz.
@@ -22,7 +22,6 @@ Jedes **Thema** hat: Zusammenfassung (Nachlesen + Glossar), Karten, Unterthemen,
 |---|---|
 | `index.html`, `styles.css` | Oberfläche (hell, Schwarz/Weiß/Grau, rote Akzente) |
 | `core.js` | Logik: Themenbaum, Wiederholungsplan, Import/Export, Prompts |
-| `starter.js` | Starter-Pakete (IT, Produktmanagement, Kommunikation; 67 Karten) |
 | `app.js` | Ansichten und Bedienung |
 | `sw.js`, `manifest.webmanifest`, `*.png` (Icons) | Offline-Betrieb und Installation aufs Handy |
 
@@ -43,7 +42,7 @@ Zeilen im Format `[Art] Aufgabe :: Lösung` sind Aufgaben (z. B. `[Rätsel]`, `[
 - Pro Tag höchstens 5 (einstellbar unter **Mehr**), die Arten wechseln sich ab.
 - Du diktierst die Antwort (Mikrofon der Tastatur), siehst die Lösung und bewertest dich: *Geschafft*, *Halb*, *Nicht*. Nicht Geschaffte kommen am nächsten Tag wieder, davor wird eine andere Aufgabe desselben Themas versucht.
 - Themen, die am längsten nicht dran waren, kommen zuerst. Auf dem Start siehst du, wie viele Themen schon geübt sind.
-- **Lernplan-Tag:** Aufgaben in Themen namens `Tag 12 …` werden erst ab diesem Tag gespielt. Unter **Mehr** oder auf dem Start stellst du den aktuellen Tag ein. Beim ersten Import startet er auf Tag 1.
+- Die Aufgaben kommen aus deinen echten Lerneinheiten: Claude gibt sie dir am Ende jeder Einheit als Markdown-Block, den du unter **Import** einfügst.
 
 ## Karten-Format (Obsidian-kompatibel)
 
