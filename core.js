@@ -66,8 +66,92 @@
     return (d / 365).toFixed(1).replace('.', ',') + ' J';
   }
 
+  /* ---------- mini tasks ("[Typ] Aufgabe :: Lösung") ---------- */
+  // A card whose front starts with "[Typ]" is a task (riddle, find the error, situation, ...).
+  // Tasks are kept out of the normal card queues and played in the daily task mode.
+  const TASK_RE = /^\s*\[([^\[\]\n]{2,30})\]\s*/;
+  const taskType = (c) => { const m = String(c.front).match(TASK_RE); return m ? m[1].trim() : null; };
+  const isTask = (c) => !!taskType(c);
+  const taskText = (c) => String(c.front).replace(TASK_RE, '');
+  // Decks named "Tag 12 ..." belong to day 12 of the learning plan.
+  const deckDay = (d) => { const m = String(d.name).match(/^\s*Tag\s*0*(\d+)/i); return m ? +m[1] : 0; };
+
+  function taskDecks(decks, day) {
+    return decks.filter((d) => d.cards.some(isTask)).map((d) => ({ d, locked: !!(day > 0 && deckDay(d) > day) }));
+  }
+
+  // Picks up to n tasks: failed ones first, then due reviews and new tasks alternating,
+  // preferring topics that were practiced longest ago; one task per topic; never the same type twice in a row.
+  function pickTasks(decks, now, n, day) {
+    now = now == null ? Date.now() : now;
+    n = n == null ? 5 : n;
+    const items = [];
+    taskDecks(decks, day).forEach(({ d, locked }, di) => {
+      if (locked) return;
+      d.cards.forEach((c) => { if (isTask(c)) items.push({ d: d.id, c: c.id, type: taskType(c), card: c, di }); });
+    });
+    const lastBy = {};
+    items.forEach((it) => { lastBy[it.d] = Math.max(lastBy[it.d] || 0, it.card.last || 0); });
+    const open = (it) => isNew(it.card) || it.card.due <= now;
+    const boost = items.filter((it) => it.card.boost && open(it));
+    const due = items.filter((it) => !it.card.boost && !isNew(it.card) && it.card.due <= now).sort((a, b) => a.card.due - b.card.due);
+    const fresh = items.filter((it) => !it.card.boost && isNew(it.card)).sort((a, b) => (lastBy[a.d] - lastBy[b.d]) || (a.di - b.di));
+    const out = [];
+    const used = new Set();
+    boost.slice(0, Math.min(2, n)).forEach((it) => { out.push(it); used.add(it.d); });
+    const lists = [due, fresh];
+    const take = (list) => {
+      for (let i = 0; i < list.length; i++) {
+        if (!used.has(list[i].d)) { const it = list.splice(i, 1)[0]; used.add(it.d); out.push(it); return true; }
+      }
+      return false;
+    };
+    let k = 0, stuck = 0;
+    while (out.length < n && stuck < 2) { if (take(lists[k % 2])) stuck = 0; else stuck++; k++; }
+    if (out.length < n) {
+      due.concat(fresh).filter((it) => out.indexOf(it) < 0).slice(0, n - out.length).forEach((it) => out.push(it));
+    }
+    const res = [];
+    const pool = out.slice();
+    while (pool.length) {
+      const prev = res.length ? res[res.length - 1].type : null;
+      let i = pool.findIndex((it) => it.type !== prev);
+      if (i < 0) i = 0;
+      res.push(pool.splice(i, 1)[0]);
+    }
+    return res.map((it) => ({ d: it.d, c: it.c, type: it.type }));
+  }
+
+  // result: 'ok' (geschafft), 'half' (halb), 'no' (nicht). "no" comes back tomorrow.
+  function scheduleTask(card, result, now) {
+    now = now == null ? Date.now() : now;
+    const r = result === 'ok' ? 2 : result === 'half' ? 1 : 0;
+    const c = schedule(card, r, now);
+    delete c.boost;
+    if (r === 0) {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 1);
+      c.due = d.getTime();
+    }
+    return c;
+  }
+
+  function taskCoverage(decks, day) {
+    const r = { topics: 0, open: 0, practiced: 0, locked: 0, tasks: 0 };
+    taskDecks(decks, day).forEach(({ d, locked }) => {
+      const t = d.cards.filter(isTask);
+      r.topics++; r.tasks += t.length;
+      if (locked) { r.locked++; return; }
+      r.open++;
+      if (t.some((c) => !isNew(c))) r.practiced++;
+    });
+    return r;
+  }
+
   function buildQueue(cards, now, newLimit) {
     now = now == null ? Date.now() : now;
+    cards = cards.filter((c) => !isTask(c));
     const due = cards.filter((c) => !isNew(c) && c.due <= now).sort((a, b) => a.due - b.due);
     const fresh = cards.filter(isNew).slice(0, newLimit == null ? 20 : newLimit);
     return due.concat(fresh);
@@ -75,6 +159,7 @@
 
   function stats(cards, now) {
     now = now == null ? Date.now() : now;
+    cards = cards.filter((c) => !isTask(c));
     let due = 0, nw = 0, mature = 0;
     cards.forEach((c) => {
       if (isNew(c)) nw++;
@@ -110,10 +195,11 @@
 
   function aggregate(decks, id, now, newLimit) {
     const ids = subtreeIds(decks, id);
-    const r = { total: 0, due: 0, new: 0, mature: 0, todo: 0, topics: ids.length - 1 };
+    const r = { total: 0, due: 0, new: 0, mature: 0, todo: 0, tasks: 0, topics: ids.length - 1 };
     ids.forEach((i) => {
       const d = decks.find((x) => x.id === i);
       const s = stats(d.cards, now);
+      r.tasks += d.cards.filter(isTask).length;
       r.total += s.total; r.due += s.due; r.new += s.new; r.mature += s.mature;
       r.todo += s.due + Math.min(s.new, newLimit == null ? 20 : newLimit);
     });
@@ -512,6 +598,7 @@
 
   const api = {
     uid, newCard, normalizeCard, isNew, schedule, fmtInterval, buildQueue, stats,
+    isTask, taskType, taskText, deckDay, pickTasks, scheduleTask, taskCoverage,
     childrenOf, subtreeIds, pathOf, aggregate, flatTopics, ensurePath,
     esc, renderMd, plain, clean, wordCount, splitPath, parseMarkdown, noteBody, demoteHeadings, toMarkdown,
     fromJSON, parseAny, toBackup, mergeDecks, shuffle, termCovered,

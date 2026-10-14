@@ -36,6 +36,15 @@ Jedes **Thema** hat: Zusammenfassung (Nachlesen + Glossar), Karten, Unterthemen,
 
 Lokal testen: `python3 -m http.server 8000` im Ordner, dann `http://localhost:8000`.
 
+## Tagesaufgaben (Mini-Aufgaben statt Karten)
+
+Zeilen im Format `[Art] Aufgabe :: Lösung` sind Aufgaben (z. B. `[Rätsel]`, `[Fehler finden]`, `[Situation]`, `[Code lesen]`). Sie erscheinen nicht in den Karten-Sitzungen, sondern als **Tagesaufgaben** auf dem Start:
+
+- Pro Tag höchstens 5 (einstellbar unter **Mehr**), die Arten wechseln sich ab.
+- Du diktierst die Antwort (Mikrofon der Tastatur), siehst die Lösung und bewertest dich: *Geschafft*, *Halb*, *Nicht*. Nicht Geschaffte kommen am nächsten Tag wieder, davor wird eine andere Aufgabe desselben Themas versucht.
+- Themen, die am längsten nicht dran waren, kommen zuerst. Auf dem Start siehst du, wie viele Themen schon geübt sind.
+- **Lernplan-Tag:** Aufgaben in Themen namens `Tag 12 …` werden erst ab diesem Tag gespielt. Unter **Mehr** oder auf dem Start stellst du den aktuellen Tag ein. Beim ersten Import startet er auf Tag 1.
+
 ## Karten-Format (Obsidian-kompatibel)
 
 ```

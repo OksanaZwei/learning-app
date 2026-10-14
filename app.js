@@ -25,12 +25,13 @@
   /* ---------- state ---------- */
   let S = load();
   function load() {
-    const fresh = { decks: [], terms: [], log: {}, comm: [], settings: { newPerSession: 20 }, seeded: false, lastTopic: null };
+    const fresh = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 20, tasksPerDay: 5, day: 0 }, seeded: false, lastTopic: null };
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
       if (s && Array.isArray(s.decks)) {
         const o = Object.assign(fresh, s);
-        o.settings = Object.assign({ newPerSession: 20 }, s.settings || {});
+        o.settings = Object.assign({ newPerSession: 20, tasksPerDay: 5, day: 0 }, s.settings || {});
+        o.tlog = o.tlog || {};
         o.decks.forEach((d) => { if (d.parent === undefined) d.parent = null; if (typeof d.summary !== 'string') d.summary = ''; });
         o.terms = o.terms || [];
         o.comm = o.comm || [];
@@ -82,6 +83,7 @@
   let QZ = null; // quiz
   let EX = null; // explain session
   let PT = null; // "auf den Punkt" exercise
+  let TK = null; // daily task session
   let IM = { decks: [], tab: 'text', target: '', keep: false };
 
   const here = () => ({ name: V.name, id: V.id, tab: V.tab });
@@ -92,11 +94,11 @@
   }
   function back(from) { go(from && from.name ? from.name : 'home', from || {}); }
 
-  const FOCUS = ['study', 'quiz', 'explain', 'point'];
+  const FOCUS = ['study', 'quiz', 'explain', 'point', 'tasks'];
   function render() {
     const fn = {
       home: viewHome, topic: viewTopic, read: viewRead, search: viewSearch, study: viewStudy, quiz: viewQuiz,
-      explain: viewExplain, point: viewPoint, words: viewWords, practice: viewPractice, import: viewImport, more: viewMore
+      explain: viewExplain, point: viewPoint, tasks: viewTasks, words: viewWords, practice: viewPractice, import: viewImport, more: viewMore
     }[V.name];
     $('#view').innerHTML = fn();
     const focus = FOCUS.includes(V.name);
@@ -114,12 +116,36 @@
     const a = agg(d.id);
     const sub = [];
     if (a.topics) sub.push(plural(a.topics, 'Thema', 'Themen'));
-    sub.push(plural(a.total, 'Karte', 'Karten'));
+    if (a.total || !a.tasks) sub.push(plural(a.total, 'Karte', 'Karten'));
+    if (a.tasks) sub.push(plural(a.tasks, 'Aufgabe', 'Aufgaben'));
     return '<button class="item" data-a="open-topic" data-id="' + d.id + '"><div class="grow"><div class="t">' + esc(d.name) +
       '</div><div class="s">' + sub.join(' · ') + '</div></div><span class="badge' + (a.todo ? '' : ' zero') + '">' + a.todo + '</span>' + ICON.chev + '</button>';
   }
 
+  function taskInfo() {
+    const day = S.settings.day, limit = S.settings.tasksPerDay || 5;
+    const cov = C.taskCoverage(S.decks, day);
+    const done = S.tlog[dayKey()] || 0;
+    const avail = cov.tasks ? C.pickTasks(S.decks, Date.now(), 50, day).length : 0;
+    return { cov, done, limit, avail, left: Math.max(0, limit - done), day };
+  }
+
+  function taskHero(ti) {
+    if (!ti.cov.tasks) return '';
+    const n = Math.min(ti.left, ti.avail);
+    const sub = ti.done + ' von ' + ti.limit + ' heute · Themen geübt: ' + ti.cov.practiced + ' von ' + ti.cov.open +
+      (ti.cov.locked ? ' (' + ti.cov.locked + ' noch gesperrt)' : '');
+    let btn;
+    if (!ti.avail) btn = '<button class="btn primary block" disabled>Heute nichts offen</button>';
+    else if (!ti.left) btn = '<button class="btn primary block" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>';
+    else btn = '<button class="btn primary block" data-a="start-tasks">Aufgaben starten</button>';
+    const dayRow = ti.cov.locked || ti.day
+      ? '<div class="row nowrap" style="margin-top:10px;align-items:center"><span class="muted small" style="flex:1">Lernplan: Tag ' + (ti.day || '–') + '</span><button class="link" data-a="day-next">Tag ' + (ti.day + 1) + ' freischalten</button></div>' : '';
+    return '<section class="hero"><p class="eyebrow">Tagesaufgaben</p><div class="big">' + n + (n ? '<i class="dot"></i>' : '') + '</div><p class="muted">' + sub + '</p>' + btn + dayRow + '</section>';
+  }
+
   function viewHome() {
+    const ti = taskInfo();
     const now = Date.now(), lim = S.settings.newPerSession;
     let todo = 0, due = 0, nw = 0;
     S.decks.forEach((d) => {
@@ -139,9 +165,10 @@
       (st ? '<span class="pill"><i class="dot"></i>' + plural(st, 'Tag', 'Tage') + '</span>' : '') +
       '<button class="x" data-a="go-search" aria-label="Suche">' + ICON.search + '</button></div></header>' +
       (backupDue() ? '<button class="item" style="margin-bottom:14px" data-a="exp-all-json"><div class="grow"><div class="t">Zeit für ein Backup</div><div class="s">' + esc(backupLabel()) + ' Tippen, dann per Mail an dich selbst sichern.</div></div>' + ICON.chev + '</button>' : '') +
-      '<section class="hero"><p class="eyebrow">Heute dran</p><div class="big">' + todo + (todo ? '<i class="dot"></i>' : '') + '</div>' +
+      taskHero(ti) +
+      (ti.cov.tasks && !todo ? '' : '<section class="hero"><p class="eyebrow">' + (ti.cov.tasks ? 'Karten' : 'Heute dran') + '</p><div class="big">' + todo + (todo ? '<i class="dot"></i>' : '') + '</div>' +
       '<p class="muted">' + due + ' fällig · ' + nw + ' neu · ' + done + ' heute gelernt</p>' +
-      '<button class="btn primary block" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>' +
+      '<button class="btn primary block" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>') +
       '<div class="row nowrap" style="margin-bottom:14px"><button class="btn ghost grow" data-a="add-term">+ Begriff merken</button>' +
       '<button class="btn ghost grow" data-a="tab" data-t="practice">Üben</button></div>' +
       (open ? '<button class="item" style="margin-bottom:28px" data-a="tab" data-t="words"><div class="grow"><div class="t">' + plural(open, 'Begriff wartet', 'Begriffe warten') + ' auf Erklärung</div><div class="s">Nachlesen und Karten daraus machen</div></div>' + ICON.chev + '</button>' : '<div style="height:14px"></div>') +
@@ -314,7 +341,7 @@
   /* ---------- quiz ---------- */
   function startQuiz(topicId) {
     const pool = [];
-    C.subtreeIds(S.decks, topicId).forEach((i) => { const d = deckById(i); d.cards.forEach((c) => pool.push({ d: d.id, c })); });
+    C.subtreeIds(S.decks, topicId).forEach((i) => { const d = deckById(i); d.cards.filter((c) => !C.isTask(c)).forEach((c) => pool.push({ d: d.id, c })); });
     const picks = C.shuffle(pool).slice(0, 10);
     const items = picks.map((p) => {
       const others = C.shuffle(pool.filter((o) => o.c.id !== p.c.id && C.plain(o.c.back) !== C.plain(p.c.back)))
@@ -372,6 +399,63 @@
     render();
   }
 
+  /* ---------- daily tasks ---------- */
+  function startTasks(extra) {
+    const day = S.settings.day, limit = S.settings.tasksPerDay || 5;
+    const left = extra ? 5 : Math.max(0, limit - (S.tlog[dayKey()] || 0));
+    if (!left) return toast('Für heute reicht es. Morgen geht es weiter.');
+    const queue = C.pickTasks(S.decks, Date.now(), left, day);
+    if (!queue.length) return toast('Heute ist nichts offen.');
+    TK = { queue, total: queue.length, done: 0, ok: 0, half: 0, no: 0, phase: 'ask', text: '', from: here() };
+    go('tasks');
+  }
+
+  function viewTasks() {
+    if (!TK) return viewHome();
+    const x = cur(TK);
+    if (!x) {
+      const cov = C.taskCoverage(S.decks, S.settings.day);
+      const more = C.pickTasks(S.decks, Date.now(), 1, S.settings.day).length;
+      return '<div class="done"><div class="big"><i class="dot"></i></div><h1>Geschafft.</h1><p class="muted" style="margin:10px 0 26px">' + plural(TK.total, 'Aufgabe', 'Aufgaben') + ': ' + TK.ok + ' geschafft' +
+        (TK.half ? ', ' + TK.half + ' halb' : '') + (TK.no ? ', ' + TK.no + ' kommen wieder' : '') + '.<br>Themen geübt: ' + cov.practiced + ' von ' + cov.open + '.</p>' +
+        '<div class="stack">' + (more ? '<button class="btn ghost block" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>' : '') + '<button class="btn primary block" data-a="end-tasks">Zurück</button></div></div>';
+    }
+    let html = sessionHead(TK, 'end-tasks') + '<div class="flash" style="min-height:0"><div class="lab">' + esc(C.taskType(x.card)) + '</div><div class="md">' + md(C.taskText(x.card)) + '</div></div>';
+    if (TK.phase === 'ask') {
+      html += '<textarea id="tk-text" rows="5" style="margin-top:14px" placeholder="Tippe auf das Mikrofon deiner Tastatur und sprich deine Antwort …">' + esc(TK.text) + '</textarea>' +
+        '<button class="btn primary block" style="margin-top:12px" data-a="tk-show">Lösung zeigen</button>' +
+        '<div style="text-align:center;margin-top:8px"><button class="link" style="color:var(--mute)" data-a="tk-show">Weiß ich nicht</button></div>';
+    } else {
+      html += (TK.text ? '<div class="flash" style="min-height:0;margin-top:12px"><div class="lab">Deine Antwort</div><div style="white-space:pre-wrap;font-size:17px">' + esc(TK.text) + '</div></div>' : '') +
+        '<div class="flash" style="min-height:0;margin-top:12px"><div class="lab a">Lösung</div><div class="md">' + md(x.card.back) + '</div></div>' +
+        '<p class="hint" style="text-align:center">Wie ist es gelaufen? Sei ehrlich, daran richtet sich, wann es wiederkommt.</p>' +
+        '<div class="row nowrap" style="margin-top:10px"><button class="btn primary grow" data-a="tk-rate" data-r="ok">Geschafft</button><button class="btn ghost grow" data-a="tk-rate" data-r="half">Halb</button><button class="btn ghost grow" data-a="tk-rate" data-r="no">Nicht</button></div>';
+    }
+    return html;
+  }
+
+  function rateTask(result) {
+    const x = cur(TK);
+    if (!x) return;
+    const i = x.deck.cards.findIndex((c) => c.id === x.card.id);
+    x.deck.cards[i] = C.scheduleTask(x.card, result, Date.now());
+    if (result === 'no') {
+      // a failed task returns tomorrow; meanwhile a different task of the same topic is tried next
+      const sib = x.deck.cards.find((c) => C.isTask(c) && C.isNew(c) && c.id !== x.card.id && !c.boost);
+      if (sib) sib.boost = true;
+    }
+    const k = dayKey();
+    S.log[k] = (S.log[k] || 0) + 1;
+    S.tlog[k] = (S.tlog[k] || 0) + 1;
+    save();
+    TK.queue.shift();
+    TK.done++;
+    TK[result]++;
+    TK.phase = 'ask'; TK.text = '';
+    render();
+    window.scrollTo(0, 0);
+  }
+
   /* ---------- explain mode ---------- */
   function startExplain(ids) {
     const now = Date.now();
@@ -383,7 +467,7 @@
     queue = queue.slice(0, 8);
     if (!queue.length) {
       const all = [];
-      ids.forEach((id) => { const d = deckById(id); if (d) d.cards.forEach((c) => all.push({ d: d.id, c: c.id, practice: true })); });
+      ids.forEach((id) => { const d = deckById(id); if (d) d.cards.filter((c) => !C.isTask(c)).forEach((c) => all.push({ d: d.id, c: c.id, practice: true })); });
       queue = C.shuffle(all).slice(0, 6);
     }
     if (!queue.length) return toast('Keine Karten zum Erklären vorhanden.');
@@ -433,7 +517,7 @@
     const sum = (t.summary || '').trim();
     if (sum) return md(sum);
     const cards = [];
-    C.subtreeIds(S.decks, t.id).forEach((i) => deckById(i).cards.forEach((c) => cards.push(c)));
+    C.subtreeIds(S.decks, t.id).forEach((i) => deckById(i).cards.forEach((c) => { if (!C.isTask(c)) cards.push(c); }));
     if (!cards.length) return '<p class="muted">Noch keine Zusammenfassung oder Karten als Vergleich – ergänze sie im Thema.</p>';
     return '<ul>' + cards.slice(0, 6).map((c) => '<li><strong>' + esc(C.plain(c.front, 90)) + '</strong> ' + esc(C.plain(c.back, 160)) + '</li>').join('') + '</ul>';
   }
@@ -493,6 +577,8 @@
     const hist = S.comm.slice(-5).reverse();
     return '<header class="top"><div><p class="eyebrow">Verstehen &amp; Kommunizieren</p><h1>Üben</h1></div></header>' +
       '<label for="pr-topic" style="margin-top:0">Thema</label><select id="pr-topic"><option value="">Alle Themen</option>' + topicOpts(sel) + '</select>' +
+      '<section style="margin-top:26px"><div class="sec-head"><h2>Tagesaufgaben</h2></div><p class="muted small" style="margin-bottom:12px">Kleine Rätsel, Fehler, Situationen und Code-Aufgaben aus allen Themen. Du diktierst, siehst die Lösung und bewertest dich.</p>' +
+      '<button class="btn primary block" data-a="start-tasks">Aufgaben starten</button></section>' +
       '<section style="margin-top:26px"><div class="sec-head"><h2>Erklären</h2></div><p class="muted small" style="margin-bottom:12px">Erkläre Karten in eigenen Worten. Sitzt es nicht, fragt die App nach – mit neuen Blickwinkeln – bis du es kannst.</p>' +
       '<button class="btn primary block" data-a="start-explain">Erklär-Training starten</button></section>' +
       '<section><div class="sec-head"><h2>Auf den Punkt</h2></div><p class="muted small" style="margin-bottom:12px">Fasse ein Thema aus dem Gedächtnis kurz zusammen – Antwort zuerst, ohne Jargon.</p>' +
@@ -596,8 +682,10 @@
     const r = C.mergeDecks(S.decks, decks);
     let resolved = 0;
     S.terms.forEach((t) => { if (!t.done && C.termCovered(t.term, r.fronts)) { t.done = true; t.doneAt = Date.now(); resolved++; } });
+    let gated = false;
+    if (!S.settings.day && decks.some((d) => C.deckDay(d) > 0 && d.cards.some(C.isTask))) { S.settings.day = 1; gated = true; }
     save();
-    toast(plural(r.added, 'Karte', 'Karten') + ' importiert' + (r.skipped ? ' (' + plural(r.skipped, 'Duplikat', 'Duplikate') + ')' : '') + (resolved ? ' · ' + plural(resolved, 'Wort', 'Wörter') + ' erledigt' : ''));
+    toast(plural(r.added, 'Karte', 'Karten') + ' importiert' + (gated ? ' · Lernplan steht auf Tag 1' : '') + (r.skipped ? ' (' + plural(r.skipped, 'Duplikat', 'Duplikate') + ')' : '') + (resolved ? ' · ' + plural(resolved, 'Wort', 'Wörter') + ' erledigt' : ''));
     return r;
   }
 
@@ -610,7 +698,9 @@
       '<p class="muted small" style="margin-bottom:12px">Tipp: Im Teilen-Menü „Mail“ wählen und die Datei an dich selbst schicken. Auf einem neuen Handy lädst du sie hier wieder ein.</p>' +
       '<div class="row"><button class="btn primary grow" data-a="exp-all-json">Backup sichern</button><button class="btn ghost grow" data-a="exp-all-md">Alles als Markdown</button></div>' +
       '<div class="row"><label class="btn ghost block" for="restore" style="margin:0">Backup einspielen</label><input id="restore" type="file" accept=".json,application/json"></div></section>' +
-      '<section><div class="sec-head"><h2>Lernen</h2></div><label for="newper" style="margin-top:0">Neue Karten pro Sitzung und Thema</label><input id="newper" type="number" min="0" max="200" inputmode="numeric" value="' + S.settings.newPerSession + '"></section>' +
+      '<section><div class="sec-head"><h2>Lernen</h2></div><label for="tasksper" style="margin-top:0">Aufgaben pro Tag</label><input id="tasksper" type="number" min="1" max="30" inputmode="numeric" value="' + S.settings.tasksPerDay + '">' +
+      '<label for="lday">Lernplan: ich bin bei Tag <span class="muted small">(0 = alle Aufgaben freigeschaltet)</span></label><input id="lday" type="number" min="0" max="999" inputmode="numeric" value="' + S.settings.day + '">' +
+      '<label for="newper">Neue Karten pro Sitzung und Thema</label><input id="newper" type="number" min="0" max="200" inputmode="numeric" value="' + S.settings.newPerSession + '"></section>' +
       '<section><div class="sec-head"><h2>Gefahrenzone</h2></div><button class="btn danger block" data-a="reset">Alle Daten löschen</button></section>' +
       '<p class="tiny">Recall · läuft offline · keine Konten, kein Tracking</p>';
   }
@@ -725,7 +815,7 @@
   function tutorPrompt(id) {
     const t = deckById(id);
     const cards = [];
-    C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => cards.push(c)));
+    C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => { if (!C.isTask(c)) cards.push(c); }));
     const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
     return C.buildTutorPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
   }
@@ -733,7 +823,7 @@
   function sparringPrompt(id) {
     const t = deckById(id);
     const cards = [];
-    C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => cards.push(c)));
+    C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => { if (!C.isTask(c)) cards.push(c); }));
     const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
     return C.buildSparringPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
   }
@@ -751,6 +841,11 @@
     reveal() { if (ST && !ST.show) { ST.show = true; render(); } },
     rate: (el) => rate(+el.dataset.r),
     'end-study'() { const f = ST && ST.from; ST = null; back(f); },
+    'start-tasks': (el) => startTasks(el && el.dataset && el.dataset.extra),
+    'tk-show'() { if (!TK) return; const t = $('#tk-text'); TK.text = t ? t.value.trim() : TK.text; TK.phase = 'show'; render(); window.scrollTo(0, 0); },
+    'tk-rate': (el) => rateTask(el.dataset.r),
+    'end-tasks'() { const f = TK && TK.from; TK = null; back(f); },
+    'day-next'() { S.settings.day = (S.settings.day || 0) + 1; save(); render(); toast('Tag ' + S.settings.day + ' freigeschaltet.'); },
     'start-quiz': (el) => startQuiz(el.dataset.id),
     pick: (el) => pick(el.dataset.id),
     'next-q'() { QZ.i++; QZ.picked = null; render(); window.scrollTo(0, 0); },
@@ -899,7 +994,7 @@
     },
     reset() {
       if (!confirm('Wirklich ALLE Themen, Karten, Wörter und den Lernfortschritt löschen? Das kann nicht rückgängig gemacht werden.')) return;
-      S = { decks: [], terms: [], log: {}, comm: [], settings: { newPerSession: 20 }, seeded: true, lastTopic: null }; save(); go('home');
+      S = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 20, tasksPerDay: 5, day: 0 }, seeded: true, lastTopic: null }; save(); go('home');
     },
 
     /* words */
@@ -1012,6 +1107,10 @@
         commitImport(decks);
         render();
       } catch (err) { toast('Datei konnte nicht gelesen werden.'); }
+    } else if (t.id === 'tasksper') {
+      S.settings.tasksPerDay = Math.max(1, Math.min(30, parseInt(t.value, 10) || 5)); save();
+    } else if (t.id === 'lday') {
+      S.settings.day = Math.max(0, Math.min(999, parseInt(t.value, 10) || 0)); save();
     } else if (t.id === 'newper') {
       S.settings.newPerSession = Math.max(0, Math.min(200, parseInt(t.value, 10) || 0)); save();
     }
@@ -1019,7 +1118,9 @@
 
   document.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.id === 'pt-text' && PT) {
+    if (t.id === 'tk-text' && TK) {
+      TK.text = t.value;
+    } else if (t.id === 'pt-text' && PT) {
       PT.text = t.value;
       const n = C.wordCount(t.value);
       const el = $('#pt-count');
