@@ -533,67 +533,122 @@
 
   /* ---------- prompts for working with Claude in the chat ---------- */
 
-  function buildArticlePrompt(paths) {
-    const list = paths && paths.length ? paths.slice(0, 40).join('; ') : 'IT > Web & APIs; Produktmanagement > Priorisierung';
-    return 'Du bist mein Lerncoach. Ich lerne Produktmanagement und IT, um Fachgespr\u00e4che mit Entwickler:innen sicher zu verstehen.\n\n' +
-      'Aufgabe: Fasse den folgenden Artikel zusammen und erstelle Karteikarten.\n\n' +
-      'Gib NUR einen Markdown-Codeblock in genau diesem Format aus:\n\n' +
-      '# Bereich > Thema\n\n## Zusammenfassung\n(5\u20138 Stichpunkte, Kernaussage zuerst, Fachbegriffe kurz erkl\u00e4rt)\n\n## Karten\nFrage :: Antwort\nFrage :: Antwort\n\n' +
-      'Regeln:\n- Ordne den Inhalt einem Thema zu, bevorzugt aus dieser Liste: ' + list + '\n' +
-      '- H\u00f6chstens 15 Karten, eine Idee pro Karte, Antworten in 1\u20132 S\u00e4tzen\n' +
-      '- Keine Ja/Nein-Fragen, Code in Backticks\n\nArtikel:\n';
+  // Editable prompt templates. {{platzhalter}} are filled in by the builders below.
+  const PROMPT_DEFAULTS = {
+    chat: {
+      name: 'Anweisung für den Chat',
+      vars: '',
+      text: 'Ich lerne IT und AWS, um mit Senior-Entwickler:innen auf Augenhöhe zu sprechen. Ich entscheide, was ich lerne, du schlägst nur vor. Ich diktiere meine Antworten auf dem Handy. Stelle deshalb immer nur EINE Frage auf einmal.\n\n' +
+        'Ablauf:\n' +
+        '1. Frage mich kurz, welches Thema ich heute lernen will (ein Vorschlag aus meinem Plan oder etwas anderes).\n' +
+        '2. Erkläre in kleinen Schritten mit Beispielen aus der Praxis. Lass mich zwischendurch in eigenen Worten antworten. Erfinde keine Details zu meinem Projekt. Wenn du etwas nicht weißt, sag es.\n' +
+        '3. Die Einheit dauert so lange, bis ich „Ende“ sage. Frage nicht nach jedem Abschnitt, ob es genug ist.\n' +
+        '4. Am Ende gibst du mir NUR zu dem, was wir wirklich besprochen haben, EINEN Markdown-Codeblock in genau diesem Format:\n\n' +
+        '# IT > <Bereich> > <Thema>\n\n## Zusammenfassung\n(5–8 Stichpunkte, Kernaussage zuerst)\n\n## Aufgaben\n[Art] Aufgabe :: Lösung\n(eine Zeile pro Aufgabe, mindestens 12, mit Leerzeichen um „::“. Arten: Rätsel, Fehler finden, Situation, Code lesen, Zuordnen, Wahr oder falsch, Shell, SQL. Erklär-Aufgaben nur selten.)\n\n## Karten\nFrage :: Antwort\n(6–10 kurze Karten mit einem Satz als Antwort, für das Quiz)\n\n' +
+        '5. Danach: neue Wörter als Liste „Wort :: Erklärung“, eine Zeile für meinen Lernstand und ein Vorschlag fürs nächste Thema.\n' +
+        '6. Schreibe nie Aufgaben im Voraus für Themen, die wir nicht besprochen haben.\n\n' +
+        'Kommunikation: Wenn ich Kommunikation üben will (Zufallsthema, Pause vor der Antwort, Zurückspiegeln, Analogie, Für Laien erklären, Änderung erklären, Füllwörter zählen, Tagesrückblick), gib mir am Ende ebenfalls einen Codeblock mit „# Kommunikation > <Übung>“ und Aufgaben im Format „[Übung] Aufgabe :: Tipp“.\n\n' +
+        'Mein Lernstand und Plan stehen unten (falls vorhanden):\n'
+    },
+    tutor: {
+      name: 'Lerngespräch (Tutor)',
+      vars: '{{thema}}, {{material}}',
+      text: 'Du bist mein geduldiger Tutor für das Thema „{{thema}}“. Ich will es wirklich verstehen und mit eigenen Worten erklären können – im Gespräch mit Entwickler:innen.\n\n' +
+        'So gehst du vor:\n1. Stelle immer nur EINE Frage und warte auf meine Antwort.\n' +
+        '2. Bewerte kurz (richtig / teilweise / falsch) und nenne die Lücke in einem Satz.\n' +
+        '3. Frage nach, bis ich es verständlich erkläre: anderes Beispiel, ohne Fachsprache, was passiert wenn es fehlt, Abgrenzung zu Ähnlichem.\n' +
+        '4. Erst wenn ich es sicher kann, gehe zur nächsten Frage.\n' +
+        '5. Am Ende: Liste meine Lücken als Karten im Format „Frage :: Antwort“, damit ich sie importieren kann.\n\n' +
+        '{{material}}Starte mit der ersten Frage.'
+    },
+    sparring: {
+      name: 'Fachgespräch',
+      vars: '{{thema}}, {{material}}',
+      text: 'Du bist ein erfahrener Senior-Entwickler in meinem Team und mein Gesprächspartner. Ich will mit dir auf Augenhöhe über „{{thema}}“ sprechen können.\n\n' +
+        'Ich lerne am besten durch Tun, nicht durch Lesen. Deshalb:\n' +
+        '1. Starte direkt mit einer realistischen Situation aus dem Arbeitsalltag (z. B. ein Ausfall ist passiert, eine Schätzung steht zur Diskussion, ein Fehler muss gesucht werden). Keine Vorlesung vorweg.\n' +
+        '2. Sprich wie ein echter Entwickler, mit Fachbegriffen, aber nie unfreundlich. Stelle EINE Frage oder Aussage pro Nachricht und warte auf mich.\n' +
+        '3. Nach meiner Antwort: erst kurz im Spiel bleiben (reagiere als Entwickler), dann in einem eigenen Absatz „Coach:“ Feedback: Was war gut? Welcher Begriff fehlte oder war falsch? Welche bessere Rückfrage hätte ich stellen können?\n' +
+        '4. Wenn ich einen Begriff nicht kenne, erkläre ihn in 2 Sätzen mit Alltagsvergleich und lass ihn mich danach selbst in eigenen Worten wiederholen.\n' +
+        '5. Steigere die Schwierigkeit langsam. Wechsle auch mal das Thema, damit ich nicht nur Auswendiges abrufe.\n' +
+        '6. Am Ende (wenn ich „Ende“ schreibe): Liste meine Lücken als Aufgaben im Format „[Situation] Aufgabe :: Lösung“ unter einer Zeile „# IT > Bereich > Thema“, damit ich sie in meine Lern-App importieren kann.\n\n' +
+        '{{material}}Starte jetzt mit der ersten Situation.'
+    },
+    terms: {
+      name: 'Wörter erklären lassen',
+      vars: '{{begriffe}}, {{themenliste}}',
+      text: 'Ich habe diese Begriffe von Entwickler:innen gehört, die ich nicht sicher verstehe:\n\n{{begriffe}}\n\n' +
+        'Erkläre sie so, dass ich sie im Meeting richtig einordnen und selbst erklären kann.\n\n' +
+        'Gib NUR einen Markdown-Codeblock in genau diesem Format aus (pro Thema ein Block):\n\n' +
+        '# Bereich > Thema\n\n## Zusammenfassung\n(2–4 Sätze: wie hängen die Begriffe zusammen, was bedeuten sie in der Praxis)\n\n## Karten\nWas ist <Begriff>? :: Definition in 1–2 Sätzen mit Alltagsvergleich\nWoran erkenne ich im Gespräch, dass <Begriff> gemeint ist, und was frage ich nach? :: ...\n\n' +
+        'Regeln: Ordne in passende Themen ein, bevorzugt aus: {{themenliste}}. Keine Fachsprache ohne Erklärung, Code in Backticks.'
+    },
+    article: {
+      name: 'Artikel zusammenfassen',
+      vars: '{{themenliste}}',
+      text: 'Du bist mein Lerncoach. Ich lerne IT, um Fachgespräche mit Entwickler:innen sicher zu verstehen.\n\n' +
+        'Aufgabe: Fasse den folgenden Artikel zusammen und erstelle Karteikarten.\n\n' +
+        'Gib NUR einen Markdown-Codeblock in genau diesem Format aus:\n\n' +
+        '# Bereich > Thema\n\n## Zusammenfassung\n(5–8 Stichpunkte, Kernaussage zuerst, Fachbegriffe kurz erklärt)\n\n## Karten\nFrage :: Antwort\nFrage :: Antwort\n\n' +
+        'Regeln:\n- Ordne den Inhalt einem Thema zu, bevorzugt aus dieser Liste: {{themenliste}}\n' +
+        '- Höchstens 15 Karten, eine Idee pro Karte, Antworten in 1–2 Sätzen\n' +
+        '- Keine Ja/Nein-Fragen, Code in Backticks\n\nArtikel:\n'
+    },
+    coach: {
+      name: 'Kommunikationscoach',
+      vars: '{{thema}}',
+      text: 'Du bist mein Kommunikationscoach. Ich will Dinge auf den Punkt bringen – klar, kurz, Antwort zuerst – besonders im Austausch mit Entwickler:innen (Thema: {{thema}}).\n\n' +
+        'Ablauf:\n1. Gib mir ein realistisches Szenario (z. B. Status-Update, Rückfrage an das Dev-Team, Absage an jemanden).\n' +
+        '2. Ich antworte in höchstens 3 Sätzen.\n' +
+        '3. Du gibst Feedback zu: Antwort zuerst? Länge? Klarheit? Verständlichkeit ohne Jargon? Dann eine bessere Version zum Vergleich.\n' +
+        '4. Danach das nächste, etwas schwierigere Szenario.\n\nStarte mit Szenario 1.'
+    }
+  };
+  const PROMPT_ORDER = ['chat', 'tutor', 'sparring', 'terms', 'article', 'coach'];
+
+  function promptText(id, custom) {
+    const c = custom && typeof custom[id] === 'string' ? custom[id] : '';
+    return c.trim() ? c : PROMPT_DEFAULTS[id].text;
+  }
+  function fillPrompt(tpl, vars) {
+    return String(tpl).replace(/\{\{(\w+)\}\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(vars, k) ? vars[k] : m));
+  }
+  function materialBlock(title, summary, cards, sumMax, cardMax, fMax, bMax) {
+    const mats = [];
+    if (summary && summary.trim()) mats.push('Zusammenfassung:\n' + summary.trim().slice(0, sumMax));
+    if (cards && cards.length) mats.push('Karten:\n' + cards.slice(0, cardMax).map((c) => '- ' + plain(c.front, fMax) + ' :: ' + plain(c.back, bMax)).join('\n'));
+    return mats.length ? title + '\n\n' + mats.join('\n\n') + '\n\n' : '';
   }
 
-  function buildTermsPrompt(terms, paths) {
+  function buildChatPrompt(custom) { return promptText('chat', custom); }
+
+  function buildArticlePrompt(paths, custom) {
+    const list = paths && paths.length ? paths.slice(0, 40).join('; ') : 'IT > Web & APIs';
+    return fillPrompt(promptText('article', custom), { themenliste: list });
+  }
+
+  function buildTermsPrompt(terms, paths, custom) {
     const list = paths && paths.length ? paths.slice(0, 40).join('; ') : 'IT > Web & APIs';
     const items = terms.map((t) => '- ' + t.term + (t.ctx ? ' (Kontext: ' + t.ctx + ')' : '')).join('\n');
-    return 'Ich arbeite im Produktmanagement und habe diese Begriffe von Entwickler:innen geh\u00f6rt, die ich nicht sicher verstehe:\n\n' + items + '\n\n' +
-      'Erkl\u00e4re sie so, dass ich sie im Meeting richtig einordnen und selbst erkl\u00e4ren kann.\n\n' +
-      'Gib NUR einen Markdown-Codeblock in genau diesem Format aus (pro Thema ein Block):\n\n' +
-      '# Bereich > Thema\n\n## Zusammenfassung\n(2\u20134 S\u00e4tze: wie h\u00e4ngen die Begriffe zusammen, was bedeutet es f\u00fcr Produkt, Aufwand oder Risiko)\n\n## Karten\nWas ist <Begriff>? :: Definition in 1\u20132 S\u00e4tzen mit Alltagsvergleich\nWoran erkenne ich im Gespr\u00e4ch, dass <Begriff> gemeint ist, und was frage ich nach? :: ...\n\n' +
-      'Regeln: Ordne in passende Themen ein, bevorzugt aus: ' + list + '. Keine Fachsprache ohne Erkl\u00e4rung, Code in Backticks.';
+    return fillPrompt(promptText('terms', custom), { begriffe: items, themenliste: list });
   }
 
-  function buildTutorPrompt(name, path, summary, cards) {
-    const mats = [];
-    if (summary && summary.trim()) mats.push('Zusammenfassung:\n' + summary.trim().slice(0, 2500));
-    if (cards && cards.length) {
-      mats.push('Karten:\n' + cards.slice(0, 25).map((c) => '- ' + plain(c.front, 140) + ' :: ' + plain(c.back, 220)).join('\n'));
-    }
-    return 'Du bist mein geduldiger Tutor f\u00fcr das Thema \u201e' + (path && path.length ? path.join(' > ') : name) + '\u201c. Ich will es wirklich verstehen und mit eigenen Worten erkl\u00e4ren k\u00f6nnen \u2013 im Gespr\u00e4ch mit Entwickler:innen.\n\n' +
-      'So gehst du vor:\n1. Stelle immer nur EINE Frage und warte auf meine Antwort.\n' +
-      '2. Bewerte kurz (richtig / teilweise / falsch) und nenne die L\u00fccke in einem Satz.\n' +
-      '3. Frage nach, bis ich es verst\u00e4ndlich erkl\u00e4re: anderes Beispiel, ohne Fachsprache, was passiert wenn es fehlt, Abgrenzung zu \u00c4hnlichem.\n' +
-      '4. Erst wenn ich es sicher kann, gehe zur n\u00e4chsten Frage.\n' +
-      '5. Am Ende: Liste meine L\u00fccken als Karten im Format \u201eFrage :: Antwort\u201c, damit ich sie importieren kann.\n\n' +
-      (mats.length ? 'Mein Material:\n\n' + mats.join('\n\n') + '\n\n' : '') + 'Starte mit der ersten Frage.';
+  function buildTutorPrompt(name, path, summary, cards, custom) {
+    return fillPrompt(promptText('tutor', custom), {
+      thema: path && path.length ? path.join(' > ') : name,
+      material: materialBlock('Mein Material:', summary, cards, 2500, 25, 140, 220)
+    });
   }
 
-  function buildCoachPrompt(name) {
-    return 'Du bist mein Kommunikationscoach. Ich will Dinge auf den Punkt bringen \u2013 klar, kurz, Antwort zuerst \u2013 besonders im Austausch zwischen Produktmanagement und Entwicklung' +
-      (name ? ' (Themenbasis: ' + name + ')' : '') + '.\n\n' +
-      'Ablauf:\n1. Gib mir ein realistisches Szenario (z. B. Status-Update an die Gesch\u00e4ftsf\u00fchrung, R\u00fcckfrage an das Dev-Team, Absage an einen Stakeholder).\n' +
-      '2. Ich antworte schriftlich in h\u00f6chstens 3 S\u00e4tzen.\n' +
-      '3. Du gibst Feedback zu: Antwort zuerst? L\u00e4nge? Klarheit? Verst\u00e4ndlichkeit ohne Jargon? Dann eine bessere Version zum Vergleich.\n' +
-      '4. Danach das n\u00e4chste, etwas schwierigere Szenario.\n\nStarte mit Szenario 1.';
+  function buildCoachPrompt(name, custom) {
+    return fillPrompt(promptText('coach', custom), { thema: name || 'IT und Kommunikation' });
   }
 
-  function buildSparringPrompt(name, path, summary, cards) {
-    const mats = [];
-    if (summary && summary.trim()) mats.push('Zusammenfassung:\n' + summary.trim().slice(0, 2000));
-    if (cards && cards.length) {
-      mats.push('Karten:\n' + cards.slice(0, 20).map((c) => '- ' + plain(c.front, 120) + ' :: ' + plain(c.back, 180)).join('\n'));
-    }
-    return 'Du bist ein erfahrener Senior-Entwickler in meinem Team und mein Sparringspartner. Ich arbeite im Produktmanagement und will mit dir auf Augenhöhe über „' +
-      (path && path.length ? path.join(' > ') : (name || 'IT und Produktmanagement')) + '“ sprechen können.\n\n' +
-      'Ich lerne am besten durch Tun, nicht durch Lesen. Deshalb:\n' +
-      '1. Starte direkt mit einer realistischen Situation aus dem Arbeitsalltag (z. B. du willst Technik-Schulden abbauen, ein Ausfall ist passiert, eine Schätzung steht zur Diskussion). Keine Vorlesung vorweg.\n' +
-      '2. Sprich wie ein echter Entwickler, mit Fachbegriffen, aber nie unfreundlich. Stelle EINE Frage oder Aussage pro Nachricht und warte auf mich.\n' +
-      '3. Nach meiner Antwort: erst kurz im Spiel bleiben (reagiere als Entwickler), dann in einem eigenen Absatz „Coach:“ Feedback: Was war gut? Welcher Begriff fehlte oder war falsch? Welche bessere Rückfrage hätte ich stellen können?\n' +
-      '4. Wenn ich einen Begriff nicht kenne, erkläre ihn in 2 Sätzen mit Alltagsvergleich und lass ihn mich danach selbst in eigenen Worten wiederholen.\n' +
-      '5. Steigere die Schwierigkeit langsam. Wechsle auch mal das Thema, damit ich nicht nur Auswendiges abrufe.\n' +
-      '6. Am Ende (wenn ich „Ende“ schreibe): Liste meine Lücken als Karten im Format „Frage :: Antwort“ unter einer Zeile „# Bereich > Thema“, damit ich sie in meine Lern-App importieren kann.\n\n' +
-      (mats.length ? 'Mein bisheriger Lernstoff (nutze ihn, aber geh gern darüber hinaus):\n\n' + mats.join('\n\n') + '\n\n' : '') + 'Starte jetzt mit der ersten Situation.';
+  function buildSparringPrompt(name, path, summary, cards, custom) {
+    return fillPrompt(promptText('sparring', custom), {
+      thema: path && path.length ? path.join(' > ') : (name || 'IT'),
+      material: materialBlock('Mein bisheriger Lernstoff (nutze ihn, aber geh gern darüber hinaus):', summary, cards, 2000, 20, 120, 180)
+    });
   }
 
   const api = {
@@ -603,7 +658,8 @@
     esc, renderMd, plain, clean, wordCount, splitPath, parseMarkdown, noteBody, demoteHeadings, toMarkdown,
     fromJSON, parseAny, toBackup, mergeDecks, shuffle, termCovered,
     FOLLOWUPS, explainRating,
-    buildArticlePrompt, buildTermsPrompt, buildTutorPrompt, buildCoachPrompt, buildSparringPrompt
+    buildArticlePrompt, buildTermsPrompt, buildTutorPrompt, buildCoachPrompt, buildSparringPrompt,
+    buildChatPrompt, PROMPT_DEFAULTS, PROMPT_ORDER, promptText
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

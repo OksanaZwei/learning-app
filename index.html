@@ -23,28 +23,36 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>
       <span>Start</span>
     </button>
+    <button data-a="tab" data-t="topics" aria-label="Themen">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span>Themen</span>
+    </button>
     <button data-a="tab" data-t="words" aria-label="Wörter">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg>
-      <i class="tb" hidden></i>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg><i class="tb" hidden></i>
       <span>Wörter</span>
     </button>
-    <button data-a="tab" data-t="practice" aria-label="Üben">
+    <button data-a="tab" data-t="comm" aria-label="Kommunikation">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>
-      <span>Üben</span>
+      <span>Kommunikation</span>
     </button>
     <button data-a="tab" data-t="import" aria-label="Import">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
       <span>Import</span>
     </button>
-    <button data-a="tab" data-t="more" aria-label="Mehr">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
-      <span>Mehr</span>
+    <button data-a="tab" data-t="backup" aria-label="Backup">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"/></svg>
+      <span>Backup</span>
+    </button>
+    <button data-a="tab" data-t="options" aria-label="Optionen">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+      <span>Optionen</span>
     </button>
   </nav>
 </div>
 <div id="sheet" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="core.js"></script>
+<script src="comm.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -34,12 +34,14 @@
   /* ---------- state ---------- */
   let S = load();
   function load() {
-    const fresh = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 20, tasksPerDay: 5, day: 0 }, seeded: true, lastTopic: null };
+    const fresh = { decks: [], terms: [], log: {}, tlog: {}, comm: [], settings: { newPerSession: 9999, tasksPerDay: 5, day: 0 }, seeded: true, lastTopic: null, cx: {} };
     try {
       const s = JSON.parse(localStorage.getItem(KEY));
       if (s && Array.isArray(s.decks)) {
         const o = Object.assign(fresh, s);
-        o.settings = Object.assign({ newPerSession: 20, tasksPerDay: 5, day: 0 }, s.settings || {});
+        o.settings = Object.assign({ newPerSession: 9999, tasksPerDay: 5, day: 0 }, s.settings || {});
+        o.settings.newPerSession = 9999;
+        o.cx = o.cx || {};
         o.tlog = o.tlog || {};
         o.decks.forEach((d) => { if (d.parent === undefined) d.parent = null; if (typeof d.summary !== 'string') d.summary = ''; });
         o.terms = o.terms || [];
@@ -101,7 +103,8 @@
   let EX = null; // explain session
   let PT = null; // "auf den Punkt" exercise
   let TK = null; // daily task session
-  let IM = { decks: [], tab: 'text', target: '', keep: false };
+  let IM = { decks: [], tab: '', target: '', keep: false };
+  const COMM = window.COMM_EX || [];
 
   const here = () => ({ name: V.name, id: V.id, tab: V.tab });
   function go(name, params) {
@@ -114,15 +117,19 @@
   const FOCUS = ['study', 'quiz', 'explain', 'point', 'tasks'];
   function render() {
     const fn = {
-      home: viewHome, topic: viewTopic, read: viewRead, search: viewSearch, study: viewStudy, quiz: viewQuiz,
-      explain: viewExplain, point: viewPoint, tasks: viewTasks, words: viewWords, practice: viewPractice, import: viewImport, more: viewMore
+      home: viewHome, learn: viewLearn, topics: viewTopics, topic: viewTopic, read: viewRead, search: viewSearch, study: viewStudy, quiz: viewQuiz,
+      explain: viewExplain, point: viewPoint, tasks: viewTasks, words: viewWords, comm: viewComm, import: viewImport, backup: viewBackup, options: viewOptions
     }[V.name];
     $('#view').innerHTML = fn();
     const focus = FOCUS.includes(V.name);
     $('#tabs').hidden = focus;
     $('#app').classList.toggle('focus', focus);
-    const tab = { home: 'home', topic: 'home', read: 'home', search: 'home', words: 'words', practice: 'practice', import: 'import', more: 'more' }[V.name];
-    document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+    const tab = { home: 'home', learn: 'home', topics: 'topics', topic: 'topics', read: 'topics', search: 'topics', words: 'words', comm: 'comm', import: 'import', backup: 'backup', options: 'options' }[V.name];
+    document.querySelectorAll('#tabs button').forEach((b) => {
+      const on = b.dataset.t === tab;
+      b.classList.toggle('on', on);
+      if (on) { const bar = $('#tabs'); bar.scrollLeft = b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2; }
+    });
     const n = openTerms().length;
     const tb = $('#tabs [data-t=words] .tb');
     if (tb) { tb.textContent = n; tb.hidden = !n; }
@@ -140,53 +147,69 @@
   }
 
   function taskInfo() {
-    const day = 0, limit = S.settings.tasksPerDay || 5;
-    const cov = C.taskCoverage(S.decks, day);
-    const done = S.tlog[dayKey()] || 0;
-    const avail = cov.tasks ? C.pickTasks(S.decks, Date.now(), 50, day).length : 0;
-    return { cov, done, limit, avail, left: Math.max(0, limit - done), day };
+    return { planned: S.settings.tasksPerDay || 5, done: S.tlog[dayKey()] || 0 };
   }
-
-  function taskHero(ti) {
-    if (!ti.cov.tasks) return '';
-    const n = Math.min(ti.left, ti.avail);
-    const sub = ti.done + ' von ' + ti.limit + ' heute · Themen geübt: ' + ti.cov.practiced + ' von ' + ti.cov.open;
-    let btn;
-    if (!ti.avail) btn = '<button class="btn primary" disabled>Heute nichts offen</button>';
-    else if (!ti.left) btn = '<button class="btn primary" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>';
-    else btn = '<button class="btn primary" data-a="start-tasks">Aufgaben starten</button>';
-    return '<section class="hero"><p class="eyebrow">Heute</p><div class="big">' + plural(n, 'Aufgabe', 'Aufgaben') + '</div><p class="muted">' + sub + '</p>' + btn + '</section>';
-  }
+  const hasLearning = () => S.decks.some((d) => d.cards.length);
 
   function viewHome() {
     const ti = taskInfo();
-    const now = Date.now(), lim = S.settings.newPerSession;
-    let todo = 0, due = 0, nw = 0;
-    S.decks.forEach((d) => {
-      const s = C.stats(d.cards, now);
-      const n = Math.min(s.new, lim);
-      due += s.due; nw += n; todo += s.due + n;
-    });
     const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
-    const st = streak();
-    const done = S.log[dayKey()] || 0;
     const open = openTerms().length;
+    let sub, btn;
+    if (!hasLearning()) {
+      sub = 'Noch nichts zum Lernen. Importiere zuerst eine Notiz.';
+      btn = '<button class="btn primary" data-a="tab" data-t="import">Zum Import</button>';
+    } else {
+      sub = ti.done >= ti.planned ? 'Das Geplante ist geschafft. Mehr geht immer.' : 'Heute geplant: ' + plural(ti.planned, 'Aufgabe', 'Aufgaben') + (ti.done ? '. Schon ' + ti.done + ' geschafft.' : '.');
+      btn = '<button class="btn primary" data-a="open-learn">Lernen starten</button>';
+    }
+    return '<p class="eyebrow" style="margin:4px 0 14px">' + esc(today) + '</p>' +
+      '<section class="go"><i class="c1"></i><i class="c2"></i><i class="c3"></i><h2>Bereit?</h2><p>' + sub + '</p>' + btn + '</section>' +
+      '<button class="item" style="margin-top:12px" data-a="add-term"><div class="grow"><div class="t">+ Wort merken</div></div></button>' +
+      (open ? '<button class="item" style="margin-top:10px" data-a="tab" data-t="words"><div class="grow"><div class="t">' + (open === 1 ? '1 Wort wartet' : open + ' Wörter warten') + '</div><div class="s">auf eine Erklärung</div></div>' + ICON.chev + '</button>' : '') +
+      (backupDue() ? '<button class="item" style="margin-top:10px" data-a="tab" data-t="backup"><div class="grow"><div class="t">Zeit für ein Backup</div><div class="s">' + esc(backupLabel()) + '</div></div>' + ICON.chev + '</button>' : '');
+  }
+
+  function viewLearn() {
+    const rows = [
+      ['🎲', 'Gemischt', 'Aufgaben und Karten aus allen Themen', 'start-tasks', '#fde4ee'],
+      ['🧩', 'Rätsel', 'Rätsel und Fehler finden', 'start-riddles', '#fff0b3'],
+      ['✅', 'Quiz', 'Antworten auswählen', 'start-quiz-all', '#ddf5ec'],
+      ['💬', 'Fachgespräch', 'Text kopieren und im Chat üben', 'copy-sparring', '#ece5fb']
+    ];
+    return '<button class="back" data-a="tab" data-t="home">' + ICON.back + 'Zurück</button>' +
+      '<h1 style="margin-bottom:16px">Was möchtest du üben?</h1><div class="list">' +
+      rows.map((r) => '<button class="item" data-a="' + r[3] + '"><span class="ic" style="background:' + r[4] + '">' + r[0] + '</span><div class="grow"><div class="t">' + r[1] + '</div><div class="s">' + r[2] + '</div></div>' + ICON.chev + '</button>').join('') + '</div>';
+  }
+
+  function topicsBody(q) {
+    if (q && q.trim()) return searchResults(q);
     const tops = C.childrenOf(S.decks, null);
-    const list = tops.length
+    return tops.length
       ? '<div class="list">' + tops.map(topicRow).join('') + '</div>'
-      : '<div class="empty"><p>Hier ist noch nichts. Lege einen Bereich an, zum Beispiel „IT“, oder importiere eine Notiz aus deinem Claude-Chat.</p><div class="row" style="justify-content:center"><button class="btn primary" data-a="new-topic" data-parent="">Bereich anlegen</button><button class="btn ghost" data-a="tab" data-t="import">Importieren</button></div></div>';
-    return '<header class="top"><div><p class="eyebrow">' + esc(today) + '</p><h1>Recall</h1></div><div class="row nowrap" style="align-items:center">' +
-      (st ? '<span class="pill"><i class="dot"></i>' + plural(st, 'Tag', 'Tage') + '</span>' : '') +
-      '<button class="x" data-a="go-search" aria-label="Suche">' + ICON.search + '</button></div></header>' +
-      (backupDue() ? '<button class="item" style="margin-bottom:14px" data-a="exp-all-json"><div class="grow"><div class="t">Zeit für ein Backup</div><div class="s">' + esc(backupLabel()) + ' Tippen, dann per Mail an dich selbst sichern.</div></div>' + ICON.chev + '</button>' : '') +
-      taskHero(ti) +
-      ((ti.cov.tasks && !todo) || !S.decks.length ? '' : '<section class="hero"><p class="eyebrow">' + (ti.cov.tasks ? 'Karten' : 'Heute dran') + '</p><div class="big">' + plural(todo, 'Karte', 'Karten') + '</div>' +
-      '<p class="muted">' + due + ' fällig · ' + nw + ' neu · ' + done + ' heute gelernt</p>' +
-      '<button class="btn primary" data-a="study-all"' + (todo ? '' : ' disabled') + '>' + (todo ? 'Jetzt lernen' : 'Alles erledigt') + '</button></section>') +
-      '<div class="row nowrap" style="margin-bottom:14px"><button class="btn ghost grow" data-a="add-term">+ Begriff merken</button>' +
-      '<button class="btn ghost grow" data-a="tab" data-t="practice">Üben</button></div>' +
-      (open ? '<button class="item" style="margin-bottom:28px" data-a="tab" data-t="words"><div class="grow"><div class="t">' + plural(open, 'Begriff wartet', 'Begriffe warten') + ' auf Erklärung</div><div class="s">Nachlesen und Karten daraus machen</div></div>' + ICON.chev + '</button>' : '<div style="height:14px"></div>') +
-      '<section><div class="sec-head"><h2>Bereiche</h2>' + (tops.length ? '<button class="link" data-a="new-topic" data-parent="">+ Neu</button>' : '') + '</div>' + list + '</section>';
+      : '<div class="empty"><p>Hier ist noch nichts. Lege ein Thema an, zum Beispiel „IT“, oder importiere eine Notiz.</p></div>';
+  }
+
+  function viewTopics() {
+    const q = V.q || '';
+    return '<header class="top"><h1>Themen</h1></header>' +
+      '<input id="tp-q" type="text" placeholder="Suchen" value="' + esc(q) + '" autocomplete="off" style="margin-bottom:14px">' +
+      '<div id="tp-body">' + topicsBody(q) + '</div>' +
+      '<div class="row" style="margin-top:16px"><button class="btn primary" data-a="new-topic" data-parent="">+ Neues Thema</button></div>';
+  }
+
+  function viewComm() {
+    const offset = new Date().getTimezoneOffset() * 60000;
+    const day = Math.floor((Date.now() - offset) / 864e5);
+    const todayEx = COMM[day % COMM.length];
+    if (!todayEx) return '<header class="top"><h1>Kommunikation</h1></header><div class="empty"><p>Keine Übungen gefunden.</p></div>';
+    const n = (S.cx || {})[dayKey()] || 0;
+    return '<header class="top"><h1>Kommunikation</h1></header>' +
+      '<section class="hero"><p class="eyebrow">Übung des Tages</p><div class="big" style="font-size:26px">' + esc(todayEx.name) + '</div><p class="muted">' + esc(todayEx.desc) + (n ? ' · heute schon ' + n + ' geübt' : '') + '</p>' +
+      '<button class="btn primary" data-a="start-comm" data-id="' + todayEx.id + '">Starten</button></section>' +
+      '<section><div class="sec-head"><h2>Alle Übungen</h2></div><div class="list">' +
+      COMM.map((e) => '<button class="item" data-a="start-comm" data-id="' + e.id + '"><div class="grow"><div class="t">' + esc(e.name) + '</div><div class="s">' + esc(e.desc) + '</div></div>' + ICON.chev + '</button>').join('') + '</div></section>' +
+      '<p class="hint">Du sprichst die Antwort, am besten laut oder per Diktat. Danach bewertest du dich selbst.</p>';
   }
 
   /* ---------- topic ---------- */
@@ -207,32 +230,34 @@
 
   function viewTopic() {
     const t = deckById(V.id);
-    if (!t) return viewHome();
+    if (!t) return viewTopics();
     const now = Date.now();
-    const a = agg(t.id);
+    const all = C.subtreeIds(S.decks, t.id).map(deckById);
+    const nAny = all.reduce((a, d) => a + d.cards.length, 0);
+    const nPlain = all.reduce((a, d) => a + d.cards.filter((c) => !C.isTask(c)).length, 0);
     const kids = C.childrenOf(S.decks, t.id);
     const sum = (t.summary || '').trim();
-    const cards = t.cards.length
-      ? '<div class="list">' + t.cards.map((c) => '<button class="item" data-a="edit-card" data-id="' + c.id + '"><div class="grow"><div class="t">' + esc(C.plain(c.front, 110)) +
-          '</div><div class="s">' + dueLabel(c, now) + '</div></div>' + ICON.chev + '</button>').join('') + '</div>'
-      : '<div class="empty"><p>' + (kids.length ? 'Die Karten liegen in den Unterthemen.' : 'Noch keine Karten in diesem Thema.') + '</p></div>';
-    const summary = sum
-      ? '<button class="item" data-a="read" data-id="' + t.id + '"><div class="grow"><div class="t">Zusammenfassung lesen</div><div class="s">' + esc(C.plain(sum, 130)) + '</div></div>' + ICON.chev + '</button>'
-      : '<div class="empty"><p>Noch keine Zusammenfassung. Trag eigene Notizen ein oder lass dir eine von Claude schreiben (Import → Prompt).</p><button class="btn ghost sm" data-a="edit-summary">Eintragen</button></div>';
-    return crumbs(t.id) +
-      '<header class="top"><div><p class="eyebrow">' + (t.parent ? 'Thema' : 'Bereich') + '</p><h1>' + esc(t.name) + '</h1></div></header>' +
-      '<div class="row nowrap"><button class="btn primary grow" data-a="study-topic"' + (a.todo ? '' : ' disabled') + '>Lernen</button>' +
-      '<button class="btn ghost grow" data-a="explain-topic"' + (a.total ? '' : ' disabled') + '>Erklären</button>' +
-      '<button class="btn ghost grow" data-a="start-quiz" data-id="' + t.id + '"' + (a.total > 1 ? '' : ' disabled') + '>Quiz</button></div>' +
-      '<div class="stats"><div class="stat' + (a.due ? ' hot' : '') + '"><b>' + a.due + '</b><span>Fällig</span></div><div class="stat"><b>' + a.new + '</b><span>Neu</span></div><div class="stat"><b>' + a.mature + '</b><span>Gefestigt</span></div></div>' +
-      '<section><div class="sec-head"><h2>Zusammenfassung</h2>' + (sum ? '<button class="link" data-a="edit-summary">Bearbeiten</button>' : '') + '</div>' + summary + '</section>' +
-      '<section><div class="sec-head"><h2>Unterthemen</h2><button class="link" data-a="new-topic" data-parent="' + t.id + '">+ Unterthema</button></div>' +
-      (kids.length ? '<div class="list">' + kids.map(topicRow).join('') + '</div>' : '<p class="muted small">Keine Unterthemen.</p>') + '</section>' +
-      '<section><div class="sec-head"><h2>Karten (' + t.cards.length + ')</h2><button class="link" data-a="edit-card" data-id="">+ Karte</button></div>' + cards + '</section>' +
-      '<section><div class="sec-head"><h2>Vertiefen</h2></div><p class="muted small" style="margin-bottom:12px">Der Tutor-Prompt gibt Claude dein Material und lässt dich im Chat so lange erklären, bis du es sicher kannst.</p>' +
-      '<button class="btn ghost block" data-a="copy-tutor">Tutor-Prompt kopieren</button></section>' +
-      '<section><div class="sec-head"><h2>Teilen &amp; Export</h2></div><div class="row"><button class="btn ghost sm" data-a="exp-md">Markdown (Obsidian)</button><button class="btn ghost sm" data-a="exp-json">JSON</button><button class="btn ghost sm" data-a="share-link">Link</button></div></section>' +
-      '<section><div class="row"><button class="btn ghost sm" data-a="edit-topic">Umbenennen / Verschieben</button><button class="btn danger sm" data-a="del-topic">Löschen</button></div></section>';
+    const parent = t.parent ? deckById(t.parent) : null;
+    const backBtn = parent
+      ? '<button class="back" data-a="open-topic" data-id="' + parent.id + '">' + ICON.back + esc(parent.name) + '</button>'
+      : '<button class="back" data-a="tab" data-t="topics">' + ICON.back + 'Themen</button>';
+    const rows = t.cards.map((c) => '<button class="item" data-a="edit-card" data-id="' + c.id + '"><div class="grow"><div class="t">' + esc(C.plain(c.front, 110)) +
+      '</div><div class="s">' + dueLabel(c, now) + '</div></div>' + ICON.chev + '</button>').join('');
+    return backBtn + '<h1 style="margin-bottom:14px">' + esc(t.name) + '</h1>' +
+      (sum ? '<div class="sum md reading">' + md(sum) + '</div>' : '<p class="muted">Noch keine Zusammenfassung.</p>') +
+      '<div class="acts"><button class="btn primary" data-a="practice-topic"' + (nAny ? '' : ' disabled') + '>Üben</button>' +
+      '<button class="btn ghost" data-a="start-quiz" data-id="' + t.id + '"' + (nPlain > 1 ? '' : ' disabled') + '>Quiz</button></div>' +
+      (kids.length ? '<section><div class="sec-head"><h2>Themen</h2></div><div class="list">' + kids.map(topicRow).join('') + '</div></section>' : '') +
+      (t.cards.length ? '<details><summary>' + plural(t.cards.length, 'Aufgabe oder Karte', 'Aufgaben und Karten') + ' ansehen</summary><div class="list" style="margin-top:10px">' + rows + '</div></details>' : '') +
+      '<details><summary>Mehr</summary><div class="row" style="margin-top:12px">' +
+      '<button class="btn ghost sm" data-a="new-topic" data-parent="' + t.id + '">+ Unterthema</button>' +
+      '<button class="btn ghost sm" data-a="edit-card" data-id="">+ Karte</button>' +
+      '<button class="btn ghost sm" data-a="edit-summary">Zusammenfassung bearbeiten</button>' +
+      '<button class="btn ghost sm" data-a="explain-topic"' + (nPlain ? '' : ' disabled') + '>Erklär-Training</button>' +
+      '<button class="btn ghost sm" data-a="copy-tutor">Lerngespräch kopieren</button>' +
+      '<button class="btn ghost sm" data-a="exp-md">Als Markdown speichern</button>' +
+      '<button class="btn ghost sm" data-a="edit-topic">Umbenennen / Verschieben</button>' +
+      '<button class="btn danger sm" data-a="del-topic">Löschen</button></div></details>';
   }
 
   /* ---------- read ---------- */
@@ -292,6 +317,7 @@
   function cur(sess) {
     if (!sess || !sess.queue.length) return null;
     const e = sess.queue[0];
+    if (e.label) return { deck: null, card: e.card, e };
     const deck = deckById(e.d);
     const card = deck && deck.cards.find((c) => c.id === e.c);
     return card ? { deck, card, e } : null;
@@ -355,7 +381,7 @@
   /* ---------- quiz ---------- */
   function startQuiz(topicId) {
     const pool = [];
-    C.subtreeIds(S.decks, topicId).forEach((i) => { const d = deckById(i); d.cards.filter((c) => !C.isTask(c)).forEach((c) => pool.push({ d: d.id, c })); });
+    (topicId ? C.subtreeIds(S.decks, topicId) : S.decks.map((d) => d.id)).forEach((i) => { const d = deckById(i); d.cards.filter((c) => !C.isTask(c)).forEach((c) => pool.push({ d: d.id, c })); });
     const picks = C.shuffle(pool).slice(0, 10);
     const items = picks.map((p) => {
       const others = C.shuffle(pool.filter((o) => o.c.id !== p.c.id && C.plain(o.c.back) !== C.plain(p.c.back)))
@@ -363,7 +389,7 @@
       return { did: p.d, cid: p.c.id, opts: C.shuffle([p].concat(others)).map((o) => ({ id: o.c.id, text: o.c.back })) };
     }).filter((it) => it.opts.length >= 2);
     if (!items.length) return toast('Für ein Quiz brauchst du mindestens 2 Karten mit unterschiedlichen Antworten.');
-    QZ = { topic: topicId, items, i: 0, score: 0, picked: null, wrong: [], from: here() };
+    QZ = { topic: topicId || '', items, i: 0, score: 0, picked: null, wrong: [], from: here() };
     go('quiz');
   }
 
@@ -414,13 +440,39 @@
   }
 
   /* ---------- daily tasks ---------- */
-  function startTasks(extra) {
-    const day = 0, limit = S.settings.tasksPerDay || 5;
-    const left = extra ? 5 : Math.max(0, limit - (S.tlog[dayKey()] || 0));
-    if (!left) return toast('Für heute reicht es. Morgen geht es weiter.');
-    const queue = C.pickTasks(S.decks, Date.now(), left, day);
-    if (!queue.length) return toast('Heute ist nichts offen.');
-    TK = { queue, total: queue.length, done: 0, ok: 0, half: 0, no: 0, phase: 'ask', text: '', from: here() };
+  function startTasks(opts) {
+    opts = opts || {};
+    const now = Date.now();
+    const decks = opts.ids ? opts.ids.map(deckById).filter(Boolean) : S.decks;
+    const riddle = (c) => ['Rätsel', 'Fehler finden'].includes(C.taskType(c));
+    const lookup = (e) => { const d = deckById(e.d); return d && d.cards.find((c) => c.id === e.c); };
+    let tq = C.pickTasks(decks, now, 60, 0);
+    if (opts.riddles) tq = tq.filter((e) => { const c = lookup(e); return c && riddle(c); });
+    if (!tq.length) {
+      const any = [];
+      decks.forEach((d) => d.cards.filter((c) => C.isTask(c) && (!opts.riddles || riddle(c))).forEach((c) => any.push({ d: d.id, c: c.id, due: c.due || 0 })));
+      tq = any.sort((a, b) => a.due - b.due).map((x) => ({ d: x.d, c: x.c }));
+    }
+    let cq = [];
+    if (!opts.riddles) {
+      decks.forEach((d) => C.buildQueue(d.cards, now, 9999).forEach((c) => cq.push({ d: d.id, c: c.id })));
+      cq = C.shuffle(cq);
+    }
+    const queue = [];
+    while (queue.length < 5 && (tq.length || cq.length)) {
+      if (tq.length) queue.push(tq.shift());
+      if (queue.length < 5 && cq.length) queue.push(cq.shift());
+    }
+    if (!queue.length) return toast(opts.riddles ? 'Noch keine Rätsel vorhanden.' : 'Hier gibt es noch nichts zu üben.');
+    TK = { queue, total: queue.length, done: 0, ok: 0, half: 0, no: 0, phase: 'ask', text: '', from: here(), opts };
+    go('tasks');
+  }
+
+  function startComm(id) {
+    const ex = COMM.find((e) => e.id === id);
+    if (!ex) return;
+    const queue = C.shuffle(ex.prompts.slice()).slice(0, 3).map((p, i) => ({ card: { id: 'cm' + i }, label: ex.name, text: p, how: ex.how }));
+    TK = { queue, total: queue.length, done: 0, ok: 0, half: 0, no: 0, phase: 'ask', text: '', from: here(), comm: ex.id };
     go('tasks');
   }
 
@@ -428,20 +480,24 @@
     if (!TK) return viewHome();
     const x = cur(TK);
     if (!x) {
-      const cov = C.taskCoverage(S.decks, 0);
-      const more = C.pickTasks(S.decks, Date.now(), 1, 0).length;
-      return '<div class="done"><div class="big"><i class="dot"></i></div><h1>Geschafft.</h1><p class="muted" style="margin:10px 0 26px">' + plural(TK.total, 'Aufgabe', 'Aufgaben') + ': ' + TK.ok + ' geschafft' +
-        (TK.half ? ', ' + TK.half + ' halb' : '') + (TK.no ? ', ' + TK.no + ' kommen wieder' : '') + '.<br>Themen geübt: ' + cov.practiced + ' von ' + cov.open + '.</p>' +
-        '<div class="stack">' + (more ? '<button class="btn ghost block" data-a="start-tasks" data-extra="1">Noch 5 Aufgaben</button>' : '') + '<button class="btn primary block" data-a="end-tasks">Zurück</button></div></div>';
+      const again = TK.comm
+        ? '<button class="btn ghost block" data-a="start-comm" data-id="' + TK.comm + '">Noch eine Runde</button>'
+        : '<button class="btn ghost block" data-a="restart-tasks">Noch 5</button>';
+      return '<div class="done"><div class="big"><i class="dot"></i></div><h1>Geschafft.</h1><p class="muted" style="margin:10px 0 26px">' + plural(TK.total, TK.comm ? 'Übung' : 'Aufgabe', TK.comm ? 'Übungen' : 'Aufgaben') + ': ' + TK.ok + ' geschafft' +
+        (TK.half ? ', ' + TK.half + ' halb' : '') + (TK.no ? ', ' + TK.no + ' kommen wieder' : '') + '.</p>' +
+        '<div class="stack">' + again + '<button class="btn primary block" data-a="end-tasks">Zurück</button></div></div>';
     }
-    let html = sessionHead(TK, 'end-tasks') + '<div class="flash" style="min-height:0"><div class="lab">' + esc(C.taskType(x.card)) + '</div><div class="md">' + md(C.taskText(x.card)) + '</div></div>';
+    const isT = C.isTask(x.card);
+    const lab = x.e.label || (isT ? C.taskType(x.card) : 'Frage');
+    const text = x.e.text || (isT ? C.taskText(x.card) : x.card.front);
+    const sol = x.e.how || x.card.back;
+    let html = sessionHead(TK, 'end-tasks') + '<div class="flash" style="min-height:0"><div class="lab">' + esc(lab) + '</div><div class="md">' + md(text) + '</div></div>';
     if (TK.phase === 'ask') {
       html += '<textarea id="tk-text" rows="5" style="margin-top:14px" placeholder="Tippe auf das Mikrofon deiner Tastatur und sprich deine Antwort …">' + esc(TK.text) + '</textarea>' +
-        '<button class="btn primary block" style="margin-top:12px" data-a="tk-show">Lösung zeigen</button>' +
-        '<div style="text-align:center;margin-top:8px"><button class="link" style="color:var(--mute)" data-a="tk-show">Weiß ich nicht</button></div>';
+        '<div class="row" style="margin-top:12px;align-items:center"><button class="btn primary" data-a="tk-show">' + (x.e.how ? 'Tipp zeigen' : 'Lösung zeigen') + '</button><button class="link" style="color:var(--mute)" data-a="tk-show">Weiß ich nicht</button></div>';
     } else {
       html += (TK.text ? '<div class="flash" style="min-height:0;margin-top:12px"><div class="lab">Deine Antwort</div><div style="white-space:pre-wrap;font-size:17px">' + esc(TK.text) + '</div></div>' : '') +
-        '<div class="flash" style="min-height:0;margin-top:12px"><div class="lab a">Lösung</div><div class="md">' + md(x.card.back) + '</div></div>' +
+        '<div class="flash" style="min-height:0;margin-top:12px"><div class="lab a">' + (x.e.how ? 'So geht’s' : 'Lösung') + '</div><div class="md">' + md(sol) + '</div></div>' +
         '<p class="hint" style="text-align:center">Wie ist es gelaufen? Sei ehrlich, daran richtet sich, wann es wiederkommt.</p>' +
         '<div class="row nowrap" style="margin-top:10px"><button class="btn primary grow" data-a="tk-rate" data-r="ok">Geschafft</button><button class="btn ghost grow" data-a="tk-rate" data-r="half">Halb</button><button class="btn ghost grow" data-a="tk-rate" data-r="no">Nicht</button></div>';
     }
@@ -451,16 +507,25 @@
   function rateTask(result) {
     const x = cur(TK);
     if (!x) return;
-    const i = x.deck.cards.findIndex((c) => c.id === x.card.id);
-    x.deck.cards[i] = C.scheduleTask(x.card, result, Date.now());
-    if (result === 'no') {
-      // a failed task returns tomorrow; meanwhile a different task of the same topic is tried next
-      const sib = x.deck.cards.find((c) => C.isTask(c) && C.isNew(c) && c.id !== x.card.id && !c.boost);
-      if (sib) sib.boost = true;
-    }
     const k = dayKey();
-    S.log[k] = (S.log[k] || 0) + 1;
-    S.tlog[k] = (S.tlog[k] || 0) + 1;
+    if (x.e.label) {
+      S.cx = S.cx || {};
+      S.cx[k] = (S.cx[k] || 0) + 1;
+      S.log[k] = (S.log[k] || 0) + 1;
+    } else if (C.isTask(x.card)) {
+      const i = x.deck.cards.findIndex((c) => c.id === x.card.id);
+      x.deck.cards[i] = C.scheduleTask(x.card, result, Date.now());
+      if (result === 'no') {
+        // a failed task returns tomorrow; meanwhile a different task of the same topic is tried next
+        const sib = x.deck.cards.find((c) => C.isTask(c) && C.isNew(c) && c.id !== x.card.id && !c.boost);
+        if (sib) sib.boost = true;
+      }
+      S.log[k] = (S.log[k] || 0) + 1;
+      S.tlog[k] = (S.tlog[k] || 0) + 1;
+    } else {
+      applyRating(x.deck, x.card, result === 'ok' ? 2 : result === 'half' ? 1 : 0);
+      S.tlog[k] = (S.tlog[k] || 0) + 1;
+    }
     save();
     TK.queue.shift();
     TK.done++;
@@ -573,79 +638,31 @@
   function viewWords() {
     const open = openTerms().slice().reverse();
     const done = S.terms.filter((t) => t.done).slice().reverse();
-    const row = (t) => '<button class="item" data-a="open-term" data-id="' + t.id + '"><div class="grow"><div class="t">' + esc(t.term) + '</div><div class="s">' + (t.ctx ? esc(t.ctx) + ' · ' : '') + ageLabel(t.added) + '</div></div>' + ICON.chev + '</button>';
-    return '<header class="top"><div><p class="eyebrow">Unbekanntes festhalten</p><h1>Wörter</h1></div></header>' +
-      '<div class="stack"><input id="w-term" type="text" placeholder="Begriff, den du nicht verstehst …" autocomplete="off">' +
-      '<input id="w-ctx" type="text" placeholder="Kontext (optional): wer, wo, worum ging’s?" autocomplete="off">' +
-      '<button class="btn primary block" data-a="add-term-inline">Merken</button></div>' +
-      '<details><summary>Mehrere auf einmal</summary><textarea id="w-bulk" rows="5" style="margin-top:10px" placeholder="Ein Begriff pro Zeile"></textarea><div class="row"><button class="btn ghost sm" data-a="bulk-add">Hinzufügen</button></div></details>' +
-      '<section style="margin-top:26px"><div class="sec-head"><h2>Offen (' + open.length + ')</h2>' + (open.length ? '<button class="link" data-a="terms-prompt">Alle an Claude</button>' : '') + '</div>' +
-      (open.length ? '<div class="list">' + open.map(row).join('') + '</div><p class="hint">„Alle an Claude“ kopiert einen Prompt. Die Antwort fügst du unter Import ein – passende Wörter werden dann automatisch erledigt.</p>' : '<div class="empty"><p>Nichts offen. Hörst du im Meeting ein Wort, das du nicht sicher erklären kannst, tipp es hier ein.</p></div>') + '</section>' +
-      (done.length ? '<details><summary>Erledigt (' + done.length + ')</summary><div class="list" style="margin-top:10px">' + done.map(row).join('') + '</div></details>' : '');
-  }
-
-  /* ---------- practice ---------- */
-  function viewPractice() {
-    const sel = V.topic || '';
-    const lim = V.limit || 40;
-    const hist = S.comm.slice(-5).reverse();
-    return '<header class="top"><div><p class="eyebrow">Verstehen &amp; Kommunizieren</p><h1>Üben</h1></div></header>' +
-      '<label for="pr-topic" style="margin-top:0">Thema</label><select id="pr-topic"><option value="">Alle Themen</option>' + topicOpts(sel) + '</select>' +
-      '<section style="margin-top:26px"><div class="sec-head"><h2>Tagesaufgaben</h2></div><p class="muted small" style="margin-bottom:12px">Kleine Rätsel, Fehler, Situationen und Code-Aufgaben aus allen Themen. Du diktierst, siehst die Lösung und bewertest dich.</p>' +
-      '<button class="btn primary block" data-a="start-tasks">Aufgaben starten</button></section>' +
-      '<section style="margin-top:26px"><div class="sec-head"><h2>Erklären</h2></div><p class="muted small" style="margin-bottom:12px">Erkläre Karten in eigenen Worten. Sitzt es nicht, fragt die App nach – mit neuen Blickwinkeln – bis du es kannst.</p>' +
-      '<button class="btn primary block" data-a="start-explain">Erklär-Training starten</button></section>' +
-      '<section><div class="sec-head"><h2>Auf den Punkt</h2></div><p class="muted small" style="margin-bottom:12px">Fasse ein Thema aus dem Gedächtnis kurz zusammen – Antwort zuerst, ohne Jargon.</p>' +
-      '<div class="row nowrap"><select id="pr-limit" style="width:auto">' + [20, 40, 60].map((n) => '<option value="' + n + '"' + (n === lim ? ' selected' : '') + '>' + n + ' Wörter</option>').join('') + '</select><button class="btn primary grow" data-a="start-point">Starten</button></div></section>' +
-      '<section><div class="sec-head"><h2>Mit Claude üben</h2></div><p class="muted small" style="margin-bottom:12px">Für echtes Nachfragen und Feedback zu deinen eigenen Formulierungen: Prompt kopieren und in Claude einfügen.</p>' +
-      '<div class="row"><button class="btn ghost sm" data-a="copy-tutor-pr">Tutor (Thema)</button><button class="btn ghost sm" data-a="copy-coach">Kommunikations-Coach</button></div></section>' +
-      '<section><div class="sec-head"><h2>Dev-Sparring</h2></div><p class="muted small" style="margin-bottom:12px">Üben wie im echten Meeting: Claude spielt einen Senior-Entwickler, du antwortest, und es gibt direkt Feedback. Mit gewähltem Thema nutzt es deinen Lernstoff.</p>' +
-      '<button class="btn primary block" data-a="copy-sparring">Sparring-Prompt kopieren</button></section>' +
-      '<section><div class="sec-head"><h2>So lernst du am besten</h2></div>' +
-      '<details><summary>1. Erst raten, dann nachlesen</summary><div class="md" style="margin-top:10px"><p>Antworte bei jeder Karte zuerst aus dem Kopf, auch wenn du unsicher bist. Das Abrufen prägt sich stärker ein als erneutes Lesen. Bewerte ehrlich: „Nochmal“ ist kein Fehler, sondern der Plan.</p></div></details>' +
-      '<details><summary>2. Täglich 10 Minuten statt einmal lang</summary><div class="md" style="margin-top:10px"><p>Kurze Einheiten mit Pausen dazwischen bleiben besser hängen. Die App legt die Abstände für dich fest. Du musst nur kommen.</p></div></details>' +
-      '<details><summary>3. In eigenen Worten erklären</summary><div class="md" style="margin-top:10px"><p>Was du ohne Fachsprache erklären kannst, hast du verstanden. Nutze das Erklär-Training und danach „Auf den Punkt“.</p></div></details>' +
-      '<details><summary>4. Tun statt nur lesen</summary><div class="md" style="margin-top:10px"><p>Übe in Situationen: Dev-Sparring, Begriff aus dem Meeting direkt in <em>Wörter</em> eintragen, und beim nächsten Gespräch eine der Rückfragen aus dem Meeting-Toolkit wirklich stellen.</p></div></details></section>' +
-      '<section><div class="sec-head"><h2>Meeting-Toolkit</h2></div>' +
-      '<details><summary>Antwort zuerst (BLUF)</summary><div class="md" style="margin-top:10px"><p>Das Ergebnis oder die Bitte steht im ersten Satz.</p><ul><li>Statt: „Wir haben uns die Zahlen angeschaut und …“</li><li>Besser: „Wir sollten Feature X verschieben, weil …“</li></ul></div></details>' +
-      '<details><summary>Drei Sätze, die immer funktionieren</summary><div class="md" style="margin-top:10px"><ul><li><strong>1.</strong> Kernaussage</li><li><strong>2.</strong> Wichtigster Grund oder Beleg</li><li><strong>3.</strong> Was jetzt passieren soll</li></ul></div></details>' +
-      '<details><summary>Wenn du etwas nicht verstehst</summary><div class="md" style="margin-top:10px"><ul><li>„Kannst du das in einem Satz für jemanden ohne Technik-Hintergrund sagen?“</li><li>„Was heißt das konkret für Nutzer und Zeitplan?“</li><li>„Ich notiere mir den Begriff – hast du ein Beispiel?“</li></ul><p>Dann: Begriff in <em>Wörter</em> eintragen.</p></div></details>' +
-      '<details><summary>Rückfragen zu Aufwandsschätzungen</summary><div class="md" style="margin-top:10px"><ul><li>„Was ist die größte Unsicherheit?“</li><li>„Was lässt sich in kleinere Schritte schneiden?“</li><li>„Gibt es eine einfachere Variante?“</li><li>„Welche Annahmen stecken in der Schätzung?“</li></ul></div></details></section>' +
-      (hist.length ? '<section><div class="sec-head"><h2>Zuletzt</h2></div><div class="list">' + hist.map((h) => '<div class="item"><div class="grow"><div class="t">' + esc(h.topic) + '</div><div class="s">Auf den Punkt · ' + h.words + '/' + h.limit + ' Wörter · ' + ageLabel(h.t) + '</div></div><span class="badge' + (h.score >= 4 ? '' : ' zero') + '">' + h.score + '/' + h.max + '</span></div>').join('') + '</div></section>' : '');
+    const row = (t) => '<button class="item" data-a="open-term" data-id="' + t.id + '"><div class="grow"><div class="t">' + esc(t.term) + '</div>' + (t.ctx ? '<div class="s">' + esc(t.ctx) + '</div>' : '') + '</div>' + ICON.chev + '</button>';
+    return '<header class="top"><h1>Wörter</h1></header>' +
+      '<div class="add"><input id="w-term" type="text" placeholder="Wort diktieren" autocomplete="off"><button class="btn primary" data-a="add-term-inline">Merken</button></div>' +
+      (open.length
+        ? '<p class="cnt">' + (open.length === 1 ? '1 wartet' : open.length + ' warten') + ' auf eine Erklärung</p><div class="list">' + open.map(row).join('') + '</div>' +
+          '<div class="row" style="margin-top:18px"><button class="btn primary" data-a="terms-prompt">Erklärung holen</button></div><p class="hint">Der Text wird kopiert. Füge ihn im Chat mit Claude ein.</p>'
+        : '<p class="muted">Noch keine Wörter gemerkt.</p>') +
+      (done.length ? '<details style="margin-top:20px"><summary>Erledigt (' + done.length + ')</summary><div class="list" style="margin-top:10px">' + done.map(row).join('') + '</div></details>' : '');
   }
 
   /* ---------- import ---------- */
   function viewImport() {
-    const t = IM.tab;
-    const tabs = [['text', 'Text'], ['file', 'Datei'], ['link', 'Link']];
-    let body = '';
-    if (t === 'text') {
-      body = '<label for="im-text">Markdown, JSON oder Obsidian-Notiz einfügen</label>' +
-        '<textarea id="im-text" class="mono" rows="9" placeholder="# IT > Web &amp; APIs\n\n## Zusammenfassung\n…\n\n## Karten\nWas ist eine API? :: Eine Schnittstelle …"></textarea>' +
-        '<details style="margin-top:10px"><summary>Notiz vom Laptop abfotografieren?</summary><div class="md" style="margin-top:10px"><ol><li>Kamera auf den Bildschirm richten.</li><li>Unten rechts auf das Text-Symbol tippen, dann <em>Alles auswählen</em> und <em>Kopieren</em>.</li><li>Hier einfügen und die Option „Gesamten Text als Zusammenfassung speichern“ anhaken.</li></ol><p>Für Karten: Prompt hier unter Import kopieren („Prompt kopieren“) und das Foto in Claude hochladen. Prüfe vorher, ob deine Firma das erlaubt.</p></div></details>';
-    } else if (t === 'file') {
-      body = '<label>Dateien aus Obsidian (.md), Text oder JSON-Backup</label><label class="btn ghost block" for="im-file" style="margin:0">Dateien auswählen</label>' +
-        '<input id="im-file" type="file" multiple accept=".md,.markdown,.txt,.json,text/*,application/json"><p class="hint">Der Dateiname dient als Thema, wenn keine Überschrift # vorhanden ist.</p>';
-    } else {
-      body = '<label for="im-url">Link zu einer .md/.json-Datei oder Recall-Teilen-Link</label><input id="im-url" type="url" inputmode="url" placeholder="https://…" autocapitalize="off" autocorrect="off">' +
-        '<p class="hint">Funktioniert mit öffentlichen Raw-Links (z. B. GitHub) und mit Links, die du in der App teilst.</p>';
-    }
-    const opts = '<label for="im-target">Einsortieren unter</label><select id="im-target"><option value="">Automatisch (nach Überschrift)</option>' + topicOpts(IM.target) + '</select>' +
-      '<label class="check" style="margin-top:14px"><input type="checkbox" id="im-keep"' + (IM.keep ? ' checked' : '') + '><span class="box"></span><span>Gesamten Text zusätzlich als Zusammenfassung speichern <span class="muted small">(für Obsidian-Notizen zum Nachlesen)</span></span></label>';
-    const go1 = t === 'file' ? '' : '<div class="row"><button class="btn primary grow" data-a="' + (t === 'text' ? 'im-parse-text' : 'im-parse-url') + '">' + (t === 'text' ? 'Vorschau' : 'Laden') + '</button></div>';
     let prev = '';
     if (IM.decks.length) {
       const n = IM.decks.reduce((a, d) => a + d.cards.length, 0);
-      prev = '<div class="preview"><div class="sep"></div><div class="sec-head"><h2>Vorschau</h2><span class="muted small">' + plural(n, 'Karte', 'Karten') + '</span></div><div class="list">' +
-        IM.decks.map((d) => '<div class="item"><div class="grow"><div class="t">' + esc(d.path.join(' › ')) + '</div><div class="s">' + plural(d.cards.length, 'Karte', 'Karten') + (d.summary ? ' · mit Zusammenfassung' : '') +
-          (d.cards[0] ? ' · z. B. „' + esc(C.plain(d.cards[0].front, 50)) + '“' : '') + '</div></div></div>').join('') +
-        '</div><div class="row"><button class="btn primary grow" data-a="im-commit">Importieren</button><button class="btn ghost" data-a="im-clear">Verwerfen</button></div></div>';
+      prev = '<div class="sec-head"><h2>Vorschau</h2><span class="muted small">' + plural(n, 'Eintrag', 'Einträge') + '</span></div><div class="list">' +
+        IM.decks.map((d) => '<div class="item"><div class="grow"><div class="t">' + esc(d.path.join(' › ')) + '</div><div class="s">' + plural(d.cards.length, 'Aufgabe oder Karte', 'Aufgaben und Karten') + (d.summary ? ' · mit Zusammenfassung' : '') + '</div></div></div>').join('') +
+        '</div><div class="row" style="margin-top:14px"><button class="btn primary" data-a="im-commit">Importieren</button><button class="btn ghost" data-a="im-clear">Verwerfen</button></div>';
     }
-    return '<header class="top"><div><p class="eyebrow">Neu</p><h1>Import</h1></div></header>' +
-      '<div class="seg">' + tabs.map((x) => '<button data-a="im-tab" data-t="' + x[0] + '" class="' + (t === x[0] ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</div>' +
-      body + opts + go1 + prev +
-      '<details style="margin-top:26px"><summary>Artikel → Zusammenfassung &amp; Karten</summary><p class="hint" style="margin:8px 0 10px">Prompt kopieren, den Artikel anhängen und an Claude geben. Die Antwort fügst du hier ein – inklusive Themenzuordnung und Zusammenfassung.</p><button class="btn ghost sm" data-a="copy-article-prompt">Prompt kopieren</button></details>' +
-      '<details><summary>Welche Formate werden erkannt?</summary><pre># Bereich &gt; Thema\n\n## Zusammenfassung\nText zum Nachlesen (bis zur nächsten # oder ## Überschrift)\n\n## Karten\nFrage :: Antwort\n- Auch als Liste :: geht\n\nMehrzeilige Frage\n?\nAntwort über\nmehrere Zeilen\n\nQ: Frage\nA: Antwort</pre><p class="hint">Eine Überschrift mit einem # startet ein Thema (Pfad mit &gt;). Das :: braucht Leerzeichen drumherum. Codeblöcke bleiben erhalten, [[Wikilinks]] werden bereinigt.</p></details>';
+    return '<header class="top"><h1>Import</h1></header><p class="muted small" style="margin-bottom:18px">Notiz oder Aufgaben aus dem Chat einlesen.</p>' +
+      (IM.decks.length ? prev :
+        '<div class="list"><label class="item" for="im-file" style="cursor:pointer"><span class="ic" style="background:#fde4ee">📄</span><div class="grow"><div class="t">Datei auswählen</div><div class="s">Markdown-Datei aus „Dateien“</div></div></label>' +
+        '<button class="item" data-a="im-tab" data-t="text"><span class="ic" style="background:#fff0b3">📋</span><div class="grow"><div class="t">Text einfügen</div><div class="s">Kopierten Text einsetzen</div></div></button></div>' +
+        (IM.tab === 'text' ? '<textarea id="im-text" class="mono" rows="9" style="margin-top:14px" placeholder="Hier einfügen …"></textarea><div class="row" style="margin-top:12px"><button class="btn primary" data-a="im-parse-text">Weiter</button></div>' : '')) +
+      '<input id="im-file" type="file" multiple accept=".md,.markdown,.txt,.json,text/*,application/json">';
   }
 
   async function readFileText(file) {
@@ -699,18 +716,25 @@
   }
 
   /* ---------- more ---------- */
-  function viewMore() {
+  function viewBackup() {
     const total = S.decks.reduce((a, d) => a + d.cards.length, 0);
-    return '<header class="top"><div><p class="eyebrow">Daten &amp; Einstellungen</p><h1>Mehr</h1></div></header>' +
-      '<section><div class="sec-head"><h2>Backup</h2></div><p class="muted small" style="margin-bottom:12px">' + plural(S.decks.length, 'Thema', 'Themen') + ' · ' + plural(total, 'Karte', 'Karten') + ' · ' + plural(S.terms.length, 'Wort', 'Wörter') +
+    return '<header class="top"><h1>Backup</h1></header>' +
+      '<p class="muted small" style="margin-bottom:16px">' + plural(S.decks.length, 'Thema', 'Themen') + ' · ' + plural(total, 'Eintrag', 'Einträge') + ' · ' + plural(S.terms.length, 'Wort', 'Wörter') +
       '. Alles liegt nur auf diesem Gerät. ' + esc(backupLabel()) + '</p>' +
-      '<p class="muted small" style="margin-bottom:12px">Tipp: Im Teilen-Menü „Mail“ wählen und die Datei an dich selbst schicken. Auf einem neuen Handy lädst du sie hier wieder ein.</p>' +
-      '<div class="row"><button class="btn primary grow" data-a="exp-all-json">Backup sichern</button><button class="btn ghost grow" data-a="exp-all-md">Alles als Markdown</button></div>' +
-      '<div class="row"><label class="btn ghost block" for="restore" style="margin:0">Backup einspielen</label><input id="restore" type="file" accept=".json,application/json"></div></section>' +
-      '<section><div class="sec-head"><h2>Lernen</h2></div><label for="tasksper" style="margin-top:0">Aufgaben pro Tag</label><input id="tasksper" type="number" min="1" max="30" inputmode="numeric" value="' + S.settings.tasksPerDay + '">' +
-      '<label for="newper">Neue Karten pro Sitzung und Thema</label><input id="newper" type="number" min="0" max="200" inputmode="numeric" value="' + S.settings.newPerSession + '"></section>' +
-      '<section><div class="sec-head"><h2>Farbe</h2></div><div class="row">' + Object.keys(ACCENTS).map((k) => '<button class="swatch' + ((ACCENTS[S.settings.accent] ? S.settings.accent : 'zucker') === k ? ' on' : '') + '" data-a="accent" data-c="' + k + '" aria-label="' + ACCENTS[k][0] + '" style="background:' + (k === 'zucker' ? 'linear-gradient(135deg,#f6a9c6 50%,#ffe07a 50%)' : ACCENTS[k][1]) + '"></button>').join('') + '</div></section>' +
-      '<section><div class="sec-head"><h2>Gefahrenzone</h2></div><button class="btn danger block" data-a="reset">Alle Daten löschen</button></section>' +
+      '<div class="stack"><button class="btn primary block" data-a="exp-all-json">Backup sichern</button>' +
+      '<label class="btn ghost block" for="restore" style="margin:0">Backup einspielen</label><input id="restore" type="file" accept=".json,application/json">' +
+      '<button class="btn ghost block" data-a="exp-all-md">Alles als Markdown speichern</button></div>' +
+      '<p class="hint" style="margin-top:14px">Tipp: Im Teilen-Menü „Mail“ wählen und die Datei an dich selbst schicken. Auf einem neuen Handy spielst du sie hier wieder ein.</p>';
+  }
+
+  function viewOptions() {
+    const cur = ACCENTS[S.settings.accent] ? S.settings.accent : 'zucker';
+    return '<header class="top"><h1>Optionen</h1></header>' +
+      '<section><div class="sec-head"><h2>Farbe</h2></div><div class="row">' + Object.keys(ACCENTS).map((k) => '<button class="swatch' + (cur === k ? ' on' : '') + '" data-a="accent" data-c="' + k + '" aria-label="' + ACCENTS[k][0] + '" style="background:' + (k === 'zucker' ? 'linear-gradient(135deg,#f6a9c6 50%,#ffe07a 50%)' : ACCENTS[k][1]) + '"></button>').join('') + '</div></section>' +
+      '<section><div class="sec-head"><h2>Plan</h2></div><label for="tasksper" style="margin-top:0">Geplant pro Tag (Aufgaben)</label><input id="tasksper" type="number" min="1" max="100" inputmode="numeric" value="' + S.settings.tasksPerDay + '">' +
+      '<p class="hint">Das ist nur dein Ziel. Du kannst jederzeit mehr lernen, nichts wird gesperrt.</p></section>' +
+      '<section><div class="sec-head"><h2>Prompts</h2></div><p class="hint" style="margin-top:0">Diese Texte kopierst du in den Chat mit Claude. Tippe einen an, um ihn zu lesen oder zu ändern.</p><div class="list">' + C.PROMPT_ORDER.map((k) => '<button class="item" data-a="edit-prompt" data-k="' + k + '"><span class="grow"><b>' + C.PROMPT_DEFAULTS[k].name + '</b>' + (S.prompts && S.prompts[k] && S.prompts[k].trim() ? '<br><small>geändert</small>' : '') + '</span></button>').join('') + '</div></section>' +
+      '<section style="margin-top:34px"><button class="btn danger block" data-a="reset">Alle Daten löschen</button></section>' +
       '<p class="tiny">Recall · läuft offline · keine Konten, kein Tracking</p>';
   }
 
@@ -826,7 +850,7 @@
     const cards = [];
     C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => { if (!C.isTask(c)) cards.push(c); }));
     const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
-    return C.buildTutorPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
+    return C.buildTutorPrompt(t.name, C.pathOf(S.decks, id), sums, cards, S.prompts);
   }
 
   function sparringPrompt(id) {
@@ -834,12 +858,12 @@
     const cards = [];
     C.subtreeIds(S.decks, id).forEach((i) => deckById(i).cards.forEach((c) => { if (!C.isTask(c)) cards.push(c); }));
     const sums = C.subtreeIds(S.decks, id).map(deckById).filter((d) => d.summary && d.summary.trim()).map((d) => d.summary.trim()).join('\n\n');
-    return C.buildSparringPrompt(t.name, C.pathOf(S.decks, id), sums, cards);
+    return C.buildSparringPrompt(t.name, C.pathOf(S.decks, id), sums, cards, S.prompts);
   }
 
   /* ---------- actions ---------- */
   const A = {
-    tab(el) { if (el.dataset.t === 'import') IM = { decks: [], tab: IM.tab, target: '', keep: false }; go(el.dataset.t, el.dataset.t === 'practice' ? { topic: V.topic, limit: V.limit } : {}); },
+    tab(el) { if (el.dataset.t === 'import') IM = { decks: [], tab: '', target: '', keep: false }; go(el.dataset.t, {}); },
     'open-topic': (el) => { closeSheet(); go('topic', { id: el.dataset.id }); },
     read: (el) => go('read', { id: el.dataset.id || V.id, tab: 'sum' }),
     'read-tab'(el) { V.tab = el.dataset.t; render(); },
@@ -850,11 +874,17 @@
     reveal() { if (ST && !ST.show) { ST.show = true; render(); } },
     rate: (el) => rate(+el.dataset.r),
     'end-study'() { const f = ST && ST.from; ST = null; back(f); },
-    'start-tasks': (el) => startTasks(el && el.dataset && el.dataset.extra),
+    'open-learn': () => go('learn'),
+    'start-tasks': () => startTasks({}),
+    'restart-tasks': () => startTasks(TK && TK.opts ? TK.opts : {}),
+    'start-riddles': () => startTasks({ riddles: true }),
+    'practice-topic': () => startTasks({ ids: C.subtreeIds(S.decks, V.id) }),
+    'start-quiz-all': () => startQuiz(null),
+    'start-comm': (el) => startComm(el.dataset.id),
     'tk-show'() { if (!TK) return; const t = $('#tk-text'); TK.text = t ? t.value.trim() : TK.text; TK.phase = 'show'; render(); window.scrollTo(0, 0); },
     'tk-rate': (el) => rateTask(el.dataset.r),
     'end-tasks'() { const f = TK && TK.from; TK = null; back(f); },
-    'start-quiz': (el) => startQuiz(el.dataset.id),
+    'start-quiz': (el) => startQuiz(el.dataset.id || null),
     pick: (el) => pick(el.dataset.id),
     'next-q'() { QZ.i++; QZ.picked = null; render(); window.scrollTo(0, 0); },
     'end-quiz'() { const f = QZ && QZ.from; QZ = null; back(f); },
@@ -909,8 +939,8 @@
     'end-point'() { const f = PT && PT.from; PT = null; back(f); },
     'copy-tutor': () => copyPrompt(tutorPrompt(V.id)),
     'copy-tutor-pr'() { if (!V.topic) return toast('Wähle oben erst ein Thema.'); copyPrompt(tutorPrompt(V.topic)); },
-    'copy-coach'() { const t = V.topic && deckById(V.topic); copyPrompt(C.buildCoachPrompt(t ? t.name : '')); },
-    'copy-article-prompt': () => copyPrompt(C.buildArticlePrompt(topicPaths())),
+    'copy-coach'() { const t = V.topic && deckById(V.topic); copyPrompt(C.buildCoachPrompt(t ? t.name : '', S.prompts)); },
+    'copy-article-prompt': () => copyPrompt(C.buildArticlePrompt(topicPaths(), S.prompts)),
 
     /* topics */
     'new-topic'(el) {
@@ -994,7 +1024,7 @@
       const ok = await saveFile('recall-backup-' + dayKey() + '.json', JSON.stringify(C.toBackup(S.decks, null, { terms: S.terms, log: S.log }), null, 2), 'application/json');
       if (ok) { S.lastBackup = Date.now(); S.dirty = 0; save(true); render(); toast('Backup erstellt – speichere es in Mail, Dateien oder OneDrive'); }
     },
-    'copy-sparring'() { if (!V.topic) return copyPrompt(C.buildSparringPrompt('', null, '', []), 'Sparring-Prompt kopiert – in Claude einfügen'); copyPrompt(sparringPrompt(V.topic), 'Sparring-Prompt kopiert – in Claude einfügen'); },
+    'copy-sparring'() { if (!V.topic) return copyPrompt(C.buildSparringPrompt('', null, '', [], S.prompts), 'Text kopiert – im Chat mit Claude einfügen'); copyPrompt(sparringPrompt(V.topic), 'Text kopiert – im Chat mit Claude einfügen'); },
     'exp-all-md'() {
       const text = S.decks.filter((d) => d.cards.length || (d.summary && d.summary.trim())).map((d) => C.toMarkdown(d, C.pathOf(S.decks, d.id))).join('\n');
       if (!text) return toast('Noch nichts zu exportieren.');
@@ -1013,7 +1043,7 @@
     },
     'save-term-sheet'() { if (addTerm($('#s-term').value, $('#s-ctx').value)) { closeSheet(); toast('Gemerkt – unter Wörter nachlesen.'); render(); } },
     'add-term-inline'() {
-      if (addTerm($('#w-term').value, $('#w-ctx').value)) { render(); const i = $('#w-term'); if (i) i.focus(); } else if (!$('#w-term').value.trim()) toast('Erst einen Begriff eintippen.');
+      if (addTerm($('#w-term').value, ($('#w-ctx') || {}).value)) { render(); const i = $('#w-term'); if (i) i.focus(); } else if (!$('#w-term').value.trim()) toast('Erst einen Begriff eintippen.');
     },
     'bulk-add'() {
       const lines = $('#w-bulk').value.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -1022,7 +1052,7 @@
       if (n) toast(plural(n, 'Begriff', 'Begriffe') + ' gemerkt');
       render();
     },
-    'terms-prompt'() { copyPrompt(C.buildTermsPrompt(openTerms(), topicPaths()), 'Prompt kopiert – in Claude einfügen, Antwort unter Import einfügen'); },
+    'terms-prompt'() { copyPrompt(C.buildTermsPrompt(openTerms(), topicPaths(), S.prompts), 'Prompt kopiert – in Claude einfügen, Antwort unter Import einfügen'); },
     'open-term'(el) {
       const t = S.terms.find((x) => x.id === el.dataset.id);
       if (!t) return;
@@ -1046,7 +1076,7 @@
       t.done = true; t.doneAt = Date.now(); S.lastTopic = tid;
       save(); closeSheet(); render(); toast('Karte angelegt');
     },
-    'term-prompt1'(el) { const t = S.terms.find((x) => x.id === el.dataset.id); copyPrompt(C.buildTermsPrompt([t], topicPaths()), 'Prompt kopiert – in Claude einfügen'); },
+    'term-prompt1'(el) { const t = S.terms.find((x) => x.id === el.dataset.id); copyPrompt(C.buildTermsPrompt([t], topicPaths(), S.prompts), 'Prompt kopiert – in Claude einfügen'); },
     'term-done'(el) { const t = S.terms.find((x) => x.id === el.dataset.id); t.done = true; t.doneAt = Date.now(); save(); closeSheet(); render(); },
     'term-reopen'(el) { const t = S.terms.find((x) => x.id === el.dataset.id); t.done = false; save(); closeSheet(); render(); },
     'term-del'(el) { S.terms = S.terms.filter((x) => x.id !== el.dataset.id); save(); closeSheet(); render(); },
@@ -1067,8 +1097,21 @@
         setPreview(parseInput(await res.text(), name));
       } catch (e) { toast('Link konnte nicht geladen werden (privat oder blockiert?).'); }
     },
-    'im-commit'() { commitImport(IM.decks); IM = { decks: [], tab: IM.tab, target: '', keep: false }; go('home'); },
+    'im-commit'() { commitImport(IM.decks); IM = { decks: [], tab: '', target: '', keep: false }; go('home'); },
     'im-clear'() { IM.decks = []; render(); },
+    'edit-prompt'(el) {
+      const k = el.dataset.k, d = C.PROMPT_DEFAULTS[k];
+      sheet('<h2>' + d.name + '</h2>' + (d.vars ? '<p class="hint">Platzhalter, die die App ausfüllt: ' + d.vars + '</p>' : '') +
+        '<textarea id="pr-text" rows="14" style="width:100%">' + C.esc(C.promptText(k, S.prompts)) + '</textarea>' +
+        '<div class="row" style="margin-top:12px"><button class="btn" data-a="save-prompt" data-k="' + k + '">Speichern</button><button class="btn ghost" data-a="reset-prompt" data-k="' + k + '">Zurücksetzen</button><button class="btn ghost" data-a="copy-prompt-text">Kopieren</button><button class="btn ghost" data-a="close-sheet">Abbrechen</button></div>');
+    },
+    'copy-prompt-text'() { copyPrompt($('#pr-text').value); },
+    'save-prompt'(el) {
+      const v = $('#pr-text').value; S.prompts = S.prompts || {};
+      if (v.trim() === C.PROMPT_DEFAULTS[el.dataset.k].text.trim()) delete S.prompts[el.dataset.k]; else S.prompts[el.dataset.k] = v;
+      save(); closeSheet(); render(); toast('Gespeichert');
+    },
+    'reset-prompt'(el) { if (S.prompts) delete S.prompts[el.dataset.k]; save(); closeSheet(); render(); toast('Zurückgesetzt'); },
     accent(el) { S.settings.accent = el.dataset.c; save(); applyAccent(); render(); }
   };
 
@@ -1110,9 +1153,7 @@
         render();
       } catch (err) { toast('Datei konnte nicht gelesen werden.'); }
     } else if (t.id === 'tasksper') {
-      S.settings.tasksPerDay = Math.max(1, Math.min(30, parseInt(t.value, 10) || 5)); save();
-    } else if (t.id === 'newper') {
-      S.settings.newPerSession = Math.max(0, Math.min(200, parseInt(t.value, 10) || 0)); save();
+      S.settings.tasksPerDay = Math.max(1, Math.min(100, parseInt(t.value, 10) || 5)); save();
     }
   });
 
@@ -1128,6 +1169,9 @@
     } else if (t.id === 'sr-q') {
       V.q = t.value;
       $('#sr-res').innerHTML = searchResults(t.value);
+    } else if (t.id === 'tp-q') {
+      V.q = t.value;
+      $('#tp-body').innerHTML = topicsBody(t.value);
     }
   });
 

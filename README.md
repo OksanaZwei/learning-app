@@ -85,3 +85,9 @@ Das App-eigene Erklär-Training und „Auf den Punkt“ funktionieren ohne KI: D
 - Auf dem iPhone hat die installierte App einen eigenen Speicher, getrennt von Safari. Importiere deshalb direkt in der installierten App und mach regelmäßig ein Backup (**Mehr → Backup**).
 - Teilen-Links (`…#import=…`) in das Feld **Import → Link** der installierten App einfügen.
 - Raw-Links aus privaten GitHub-Repos lassen sich nicht laden; dafür Datei-Import nutzen.
+
+
+## Reiter
+Start · Themen · Wörter · Kommunikation · Import · Backup · Optionen.
+Keine Vorlagen mehr. Unter Optionen → Prompts kannst du alle Texte für den Chat ansehen, ändern und zurücksetzen.
+Dateien: index.html, styles.css, core.js, comm.js, app.js, sw.js, manifest.webmanifest, 3 Icons.
