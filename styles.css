@@ -246,3 +246,10 @@ details .md ul { margin-bottom: .4em; }
 .sum { font-size: 17px; line-height: 1.6; }
 .acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 22px; }
 .item small { color: var(--faint); }
+
+/* Begriff unklar */
+.qrow { display: flex; justify-content: flex-end; margin: 8px 0 0; }
+.qbtn { border: 1px solid var(--line); background: var(--soft, #fff); color: var(--accent-ink); font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 99px; }
+.wrow { padding: 0; align-items: stretch; }
+.wrow .wopen { border: 0; background: none; text-align: left; padding: 12px 14px; color: inherit; font: inherit; }
+.wrow .wok { border: 0; border-left: 1px solid var(--line); background: none; color: var(--accent-ink); font-size: 20px; width: 52px; flex: 0 0 52px; }

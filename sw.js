@@ -1,4 +1,4 @@
-const VERSION = 'recall-v9';
+const VERSION = 'recall-v10';
 const ASSETS = [
   './', './index.html', './styles.css', './core.js', './comm.js', './app.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'

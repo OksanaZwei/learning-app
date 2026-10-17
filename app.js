@@ -337,7 +337,7 @@
     const now = Date.now();
     let html = sessionHead(ST, 'end-study') + '<div class="flash" data-a="reveal"><div class="lab">Frage</div><div class="md">' + md(x.card.front) + '</div>';
     if (ST.show) html += '<hr><div class="lab a">Antwort</div><div class="md">' + md(x.card.back) + '</div>';
-    html += '</div>';
+    html += '</div>' + qBtn(x.card.front);
     if (!ST.show) {
       html += '<button class="btn primary block" style="margin-top:16px" data-a="reveal">Antwort zeigen</button>';
     } else {
@@ -407,7 +407,7 @@
     const card = deck.cards.find((c) => c.id === it.cid);
     const letters = ['A', 'B', 'C', 'D'];
     let html = sessionHead({ done: QZ.i, total: QZ.items.length }, 'end-quiz') +
-      '<div class="flash" style="min-height:0"><div class="lab">Frage</div><div class="md">' + md(card.front) + '</div></div><div class="opts">';
+      '<div class="flash" style="min-height:0"><div class="lab">Frage</div><div class="md">' + md(card.front) + '</div></div>' + qBtn(card.front) + '<div class="opts">';
     it.opts.forEach((o, k) => {
       let cls = '';
       if (QZ.picked != null) { if (o.id === it.cid) cls = ' ok'; else if (o.id === QZ.picked) cls = ' bad'; }
@@ -491,7 +491,7 @@
     const lab = x.e.label || (isT ? C.taskType(x.card) : 'Frage');
     const text = x.e.text || (isT ? C.taskText(x.card) : x.card.front);
     const sol = x.e.how || x.card.back;
-    let html = sessionHead(TK, 'end-tasks') + '<div class="flash" style="min-height:0"><div class="lab">' + esc(lab) + '</div><div class="md">' + md(text) + '</div></div>';
+    let html = sessionHead(TK, 'end-tasks') + '<div class="flash" style="min-height:0"><div class="lab">' + esc(lab) + '</div><div class="md">' + md(text) + '</div></div>' + qBtn(text);
     if (TK.phase === 'ask') {
       html += '<textarea id="tk-text" rows="5" style="margin-top:14px" placeholder="Tippe auf das Mikrofon deiner Tastatur und sprich deine Antwort …">' + esc(TK.text) + '</textarea>' +
         '<div class="row" style="margin-top:12px;align-items:center"><button class="btn primary" data-a="tk-show">' + (x.e.how ? 'Tipp zeigen' : 'Lösung zeigen') + '</button><button class="link" style="color:var(--mute)" data-a="tk-show">Weiß ich nicht</button></div>';
@@ -635,17 +635,27 @@
     save();
     return true;
   }
+  function qBtn(ctx) {
+    return '<div class="qrow"><button class="qbtn" data-a="ask-term" data-ctx="' + esc(C.plain(ctx || '', 160)) + '">? Begriff unklar</button></div>';
+  }
+  let lastSel = '', lastSelAt = 0;
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection && window.getSelection();
+    const t = sel ? String(sel).trim() : '';
+    if (t && t.length <= 60 && sel.anchorNode && $('#view').contains(sel.anchorNode)) { lastSel = t; lastSelAt = Date.now(); }
+  });
   function viewWords() {
     const open = openTerms().slice().reverse();
     const done = S.terms.filter((t) => t.done).slice().reverse();
-    const row = (t) => '<button class="item" data-a="open-term" data-id="' + t.id + '"><div class="grow"><div class="t">' + esc(t.term) + '</div>' + (t.ctx ? '<div class="s">' + esc(t.ctx) + '</div>' : '') + '</div>' + ICON.chev + '</button>';
+    const row = (t) => '<div class="item wrow"><button class="grow wopen" data-a="open-term" data-id="' + t.id + '"><div class="t">' + esc(t.term) + '</div>' + (t.ctx ? '<div class="s">' + esc(t.ctx) + '</div>' : '') + '</button>' +
+      (t.done ? '' : '<button class="wok" data-a="term-done" data-id="' + t.id + '" aria-label="Verstanden">✓</button>') + '</div>';
     return '<header class="top"><h1>Wörter</h1></header>' +
       '<div class="add"><input id="w-term" type="text" placeholder="Wort diktieren" autocomplete="off"><button class="btn primary" data-a="add-term-inline">Merken</button></div>' +
       (open.length
         ? '<p class="cnt">' + (open.length === 1 ? '1 wartet' : open.length + ' warten') + ' auf eine Erklärung</p><div class="list">' + open.map(row).join('') + '</div>' +
-          '<div class="row" style="margin-top:18px"><button class="btn primary" data-a="terms-prompt">Erklärung holen</button></div><p class="hint">Der Text wird kopiert. Füge ihn im Chat mit Claude ein.</p>'
+          '<div class="row" style="margin-top:18px"><button class="btn primary" data-a="terms-prompt">Alle erklären lassen</button></div><p class="hint">Der Text mit allen offenen Begriffen wird kopiert. Füge ihn im Chat mit Claude ein. Hast du einen Begriff verstanden, tippe auf ✓.</p>'
         : '<p class="muted">Noch keine Wörter gemerkt.</p>') +
-      (done.length ? '<details style="margin-top:20px"><summary>Erledigt (' + done.length + ')</summary><div class="list" style="margin-top:10px">' + done.map(row).join('') + '</div></details>' : '');
+      (done.length ? '<details style="margin-top:20px"><summary>Verstanden (' + done.length + ')</summary><div class="list" style="margin-top:10px">' + done.map(row).join('') + '</div></details>' : '');
   }
 
   /* ---------- import ---------- */
@@ -1052,19 +1062,33 @@
       if (n) toast(plural(n, 'Begriff', 'Begriffe') + ' gemerkt');
       render();
     },
+    'ask-term'(el) {
+      const pre = Date.now() - lastSelAt < 20000 ? lastSel : '';
+      const ctx = el.dataset.ctx || '';
+      sheet('<h3>Welcher Begriff ist unklar?</h3>' + (ctx ? '<p class="muted small">Aus: ' + esc(ctx) + '</p>' : '') +
+        '<input id="aq-term" type="text" autocomplete="off" placeholder="Begriff tippen oder diktieren" value="' + esc(pre) + '">' +
+        '<p class="hint">Tipp: Markiere das Wort im Text, bevor du auf „? Begriff unklar“ tippst, dann steht es schon hier.</p>' +
+        '<div class="row"><button class="btn primary" data-a="ask-term-save" data-ctx="' + esc(ctx) + '">Merken</button><button class="btn ghost" data-a="close-sheet">Abbrechen</button></div>');
+      setTimeout(() => { const i = $('#aq-term'); if (i && !i.value) i.focus(); }, 200);
+    },
+    'ask-term-save'(el) {
+      const v = $('#aq-term').value.trim();
+      if (!v) return toast('Bitte einen Begriff eingeben.');
+      if (addTerm(v, el.dataset.ctx)) { closeSheet(); toast('„' + v + '“ gemerkt – unter Wörter'); lastSel = ''; }
+    },
     'terms-prompt'() { copyPrompt(C.buildTermsPrompt(openTerms(), topicPaths(), S.prompts), 'Prompt kopiert – in Claude einfügen, Antwort unter Import einfügen'); },
     'open-term'(el) {
       const t = S.terms.find((x) => x.id === el.dataset.id);
       if (!t) return;
       const flat = C.flatTopics(S.decks);
       const def = S.lastTopic && deckById(S.lastTopic) ? S.lastTopic : (flat.find((x) => x.depth > 0) || flat[0] || {}).id;
-      sheet('<h3>' + esc(t.term) + '</h3>' + (t.ctx ? '<p class="muted small">' + esc(t.ctx) + '</p>' : '') + (t.done ? '<p class="muted small">Erledigt.</p>' : '') +
+      sheet('<h3>' + esc(t.term) + '</h3>' + (t.ctx ? '<p class="muted small">' + esc(t.ctx) + '</p>' : '') + (t.done ? '<p class="muted small">Verstanden.</p>' : '') +
         '<label for="t-front">Frage für die Karte</label><input id="t-front" type="text" value="' + esc('Was ist ' + t.term + '?') + '">' +
         '<label for="t-back">Erklärung in eigenen Worten</label><textarea id="t-back" rows="4" placeholder="nachgelesen oder von Claude erklärt bekommen …"></textarea>' +
         '<label for="t-topic">Thema</label><select id="t-topic">' + topicOpts(def) + '</select>' +
         '<div class="row"><button class="btn primary grow" data-a="term-card" data-id="' + t.id + '">Karte anlegen</button></div>' +
         '<div class="row"><button class="btn ghost sm" data-a="term-prompt1" data-id="' + t.id + '">Prompt für Claude</button>' +
-        (t.done ? '<button class="btn ghost sm" data-a="term-reopen" data-id="' + t.id + '">Wieder öffnen</button>' : '<button class="btn ghost sm" data-a="term-done" data-id="' + t.id + '">Erledigt</button>') +
+        (t.done ? '<button class="btn ghost sm" data-a="term-reopen" data-id="' + t.id + '">Wieder öffnen</button>' : '<button class="btn ghost sm" data-a="term-done" data-id="' + t.id + '">Verstanden</button>') +
         '<button class="btn danger sm" data-a="term-del" data-id="' + t.id + '">Löschen</button></div>');
     },
     'term-card'(el) {
